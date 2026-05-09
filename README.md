@@ -1,6 +1,6 @@
 # Taiwan Stock Fundamental & Price Intelligence Platform
 
-台股基本面與股價智慧分析平台是一個 value-oriented data engineering MVP side project。它從 FinMind API 擷取台灣上市公司的股價、月營收、財務與估值資料，整理為 silver/gold analytical tables，並輸出適合 DuckDB、Power BI 與 Streamlit Web App 使用的資料集。
+台股基本面與股價智慧分析平台是一個 value-oriented data engineering MVP side project。它使用 TWSE OpenAPI 擷取台灣上市公司的每日股價、月營收、財務資料與公司基本資料，整理為 silver/gold analytical tables，並輸出適合 DuckDB、Power BI 與 Streamlit Web App 使用的資料集。
 
 > Disclaimer: 本專案僅作為資料工程與分析 side project，不構成投資建議。Financial Health Score 是 MVP scoring logic，用於展示資料產品設計，不應直接作為買賣依據。
 
@@ -10,12 +10,12 @@
 
 ## Web App Overview
 
-`app.py` 是 Streamlit 入口檔案，展示 `data/gold/` analytical tables。Web app 保留原本資料工程架構：FinMind extraction、silver transformation、gold marts 與 DuckDB loading 仍由 `src/` CLI 負責，Streamlit 只讀取 gold layer 並呈現互動式分析。
+`app.py` 是 Streamlit 入口檔案，展示 `data/gold/` analytical tables。Web app 保留資料工程架構：TWSE OpenAPI extraction、silver transformation、gold marts 與 DuckDB loading 由 `src/` CLI 負責，Streamlit 只讀取 silver/gold layer 並呈現互動式分析。
 
 App pages:
 
 - Executive Overview: portfolio-level health score、risk distribution、Revenue YoY Top 10、Health Score Top 10、高風險公司清單。
-- Company Analysis: 可選公司 close price、revenue YoY、health score、risk level、營收/股價/分數趨勢與同業排名。
+- Company Analysis: 可選公司分析，包含公司基本資料、月營收、每日股價、股價趨勢、日報酬率與股價財務指標關聯。
 - Semiconductor Peer Comparison: 半導體同業 revenue YoY、monthly return、volatility、health score 與排名。
 - Revenue Growth Analysis: 可選公司月營收、YoY 趨勢、Top/Bottom 10 與 growth signal 分布。
 - Risk Monitoring: High Risk、Watch、YoY 衰退且低於 MA60、高波動公司與風險分布。
@@ -32,7 +32,7 @@ docs/screenshots/semiconductor_peer_comparison.png
 
 本專案不是單純下載股價 CSV，而是建立完整資料工程流程：
 
-- Raw layer: 保存 FinMind 原始資料。
+- Raw layer: 保存 TWSE OpenAPI 原始資料。
 - Silver layer: 標準化欄位、計算報酬、移動平均、波動率、營收 YoY/MoM。
 - Gold layer: 建立公司月度快照、營收成長、股價特徵與半導體同業比較資料。
 - Local warehouse: 將 silver/gold tables 載入 DuckDB，方便 SQL 分析與 Power BI 連接。
@@ -40,7 +40,7 @@ docs/screenshots/semiconductor_peer_comparison.png
 ## Architecture
 
 ```text
-FinMind API
+TWSE OpenAPI
   -> data/raw CSV
   -> silver tables: cleaned features
   -> gold tables: analytical marts
@@ -50,18 +50,16 @@ FinMind API
 
 ## Data Source
 
-API base URL: `https://api.finmindtrade.com/api/v4/data`
+API base URL: `https://openapi.twse.com.tw/v1`
 
 Datasets:
 
-- `TaiwanStockInfo`
-- `TaiwanStockPrice`
-- `TaiwanStockMonthRevenue`
-- `TaiwanStockFinancialStatements`
-- `TaiwanStockBalanceSheet`
-- `TaiwanStockCashFlowsStatement`
-- `TaiwanStockDividend`
-- `TaiwanStockPER`
+- `opendata/t187ap03_L`: 公司基本資料
+- `exchangeReport/STOCK_DAY_ALL`: 每日收盤行情
+- `opendata/t187ap05_L`: 月營收
+- `opendata/t187ap06_L`: 損益表來源
+- `opendata/t187ap07_L`: 資產負債表來源
+- `opendata/t187ap08_L`: 現金流量表來源
 
 ## Project Structure
 
@@ -93,27 +91,9 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## FINMIND_TOKEN
+## Secrets
 
-Token is optional but recommended for stable API usage.
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env`:
-
-```text
-FINMIND_TOKEN=your_token_here
-```
-
-Secrets are read from environment variables, `.env`, or Streamlit Community Cloud secrets. The code does not hard-code tokens.
-
-For Streamlit Community Cloud, add this in app settings under **Secrets**:
-
-```toml
-FINMIND_TOKEN = "your_token_here"
-```
+TWSE OpenAPI endpoints used by this MVP do not require an API token. `.env` is still ignored by Git for future extensions, but no secret is required to run the current app.
 
 ## CLI
 
@@ -161,7 +141,7 @@ The app will not crash when data files are missing.
 1. Push this repository to GitHub.
 2. Confirm `app.py` and `requirements.txt` are in the repo root.
 3. In Streamlit Community Cloud, create a new app and set the main file path to `app.py`.
-4. Add `FINMIND_TOKEN` in Streamlit secrets if you want authenticated FinMind API usage.
+4. No Streamlit secret is required for the current TWSE OpenAPI workflow.
 5. Ensure generated local data and secrets are not committed. `.gitignore` excludes `.env`, `data/raw/`, `data/silver/`, `data/gold/`, and `data/*.duckdb`.
 
 For a portfolio deployment, either commit small sample gold tables intentionally after reviewing licensing/data policy, or run the ETL workflow in a controlled environment and publish only approved derived outputs.
@@ -174,11 +154,16 @@ Silver tables:
 - `silver_stock_price`
 - `silver_monthly_revenue`
 - `silver_financial_statement`
+- `silver_income_statement`
+- `silver_balance_sheet`
+- `silver_cash_flow_statement`
+- `silver_fundamental_metrics`
 - `silver_per_dividend`
 
 Gold tables:
 
 - `gold_company_monthly_snapshot`
+- `gold_operating_dashboard`
 - `gold_stock_price_features`
 - `gold_revenue_growth`
 - `gold_semiconductor_peer_comparison`
@@ -226,6 +211,19 @@ Risk levels:
 - 40 to 59: `Watch`
 - Below 40: `High Risk`
 
+## Operating Dashboard Metrics
+
+`gold_operating_dashboard` is the main app table. It is designed for a Goodinfo-like company operating view with a cleaner Streamlit UI. It includes:
+
+- 股票代號、股票名稱
+- 開盤價、最高價、最低價、收盤價、漲跌價差
+- 成交股數、成交金額、成交筆數
+- 股價趨勢、日報酬率、月報酬率、波動率
+- 股價與月營收 YoY/MoM 關聯
+- ROE、ROA、毛利率、營業利益率、負債比率、流動比率
+- 月營收 YoY、月營收 MoM
+- EPS、股價報酬率
+
 ## Semiconductor Peer Comparison
 
 `gold_semiconductor_peer_comparison` filters `industry_group = Semiconductor` from `stocks.yml`. For each month it ranks:
@@ -251,7 +249,7 @@ Risk levels:
 The Streamlit app uses wide layout, sidebar navigation, company/month/industry filters, metric cards, sortable dataframes, and Plotly charts.
 
 1. Executive Overview: summarizes latest health score, risk counts, Revenue YoY Top 10, Health Score Top 10, and high-risk companies.
-2. Company Analysis: selected company page with latest metrics, trend lines, and semiconductor ranks when available.
+2. Company Analysis: selected company page with six areas: company profile, monthly revenue, income statement, balance sheet, cash flow statement, and daily stock price.
 3. Semiconductor Peer Comparison: compares semiconductor peers using revenue growth, return, volatility, valuation, and ranks.
 4. Revenue Growth Analysis: focuses on revenue trend, YoY momentum, growth signals, and top/bottom movers.
 5. Risk Monitoring: highlights High Risk and Watch companies plus weak revenue/price trend and high volatility signals.
@@ -262,7 +260,7 @@ The Streamlit app uses wide layout, sidebar navigation, company/month/industry f
 pytest
 ```
 
-The tests cover FinMind parameter building, stock price features, monthly revenue YoY, health score bounds, risk mapping, peer ranking, and stock configuration.
+The tests cover API parameter building, stock price features, monthly revenue YoY, health score bounds, risk mapping, peer ranking, and stock configuration.
 
 ## Future Enhancements
 

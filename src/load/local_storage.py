@@ -57,11 +57,16 @@ def load_tables_to_duckdb(
         "silver_stock_price": silver_dir,
         "silver_monthly_revenue": silver_dir,
         "silver_financial_statement": silver_dir,
+        "silver_income_statement": silver_dir,
+        "silver_balance_sheet": silver_dir,
+        "silver_cash_flow_statement": silver_dir,
+        "silver_fundamental_metrics": silver_dir,
         "silver_per_dividend": silver_dir,
         "gold_company_monthly_snapshot": gold_dir,
         "gold_stock_price_features": gold_dir,
         "gold_revenue_growth": gold_dir,
         "gold_semiconductor_peer_comparison": gold_dir,
+        "gold_operating_dashboard": gold_dir,
         "gold_winbond_snapshot": gold_dir,
     }
     db_path.parent.mkdir(parents=True, exist_ok=True)

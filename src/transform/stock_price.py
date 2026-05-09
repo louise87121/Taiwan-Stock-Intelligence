@@ -9,8 +9,10 @@ SILVER_STOCK_PRICE_COLUMNS = [
     "high_price",
     "low_price",
     "close_price",
+    "price_change",
     "trading_volume",
     "trading_money",
+    "transaction_count",
     "daily_return",
     "monthly_return",
     "ma_20",
@@ -21,6 +23,14 @@ SILVER_STOCK_PRICE_COLUMNS = [
 ]
 
 
+def _parse_twse_date(value: object) -> pd.Timestamp:
+    text = str(value).strip()
+    if text.isdigit() and len(text) == 7:
+        year = int(text[:3]) + 1911
+        return pd.Timestamp(year=year, month=int(text[3:5]), day=int(text[5:7]))
+    return pd.to_datetime(value, errors="coerce")
+
+
 def transform_stock_price(raw_df: pd.DataFrame) -> pd.DataFrame:
     if raw_df.empty:
         return pd.DataFrame(columns=SILVER_STOCK_PRICE_COLUMNS)
@@ -28,23 +38,52 @@ def transform_stock_price(raw_df: pd.DataFrame) -> pd.DataFrame:
     df = raw_df.copy()
     rename_map = {
         "stock_id": "stock_id",
+        "Code": "stock_id",
+        "證券代號": "stock_id",
         "date": "date",
+        "snapshot_date": "date",
         "Trading_Volume": "trading_volume",
+        "TradeVolume": "trading_volume",
+        "成交股數": "trading_volume",
         "Trading_money": "trading_money",
+        "TradeValue": "trading_money",
+        "成交金額": "trading_money",
+        "Transaction": "transaction_count",
+        "成交筆數": "transaction_count",
         "open": "open_price",
+        "OpeningPrice": "open_price",
+        "開盤價": "open_price",
         "max": "high_price",
+        "HighestPrice": "high_price",
+        "最高價": "high_price",
         "min": "low_price",
+        "LowestPrice": "low_price",
+        "最低價": "low_price",
         "close": "close_price",
+        "ClosingPrice": "close_price",
+        "收盤價": "close_price",
+        "Change": "price_change",
+        "漲跌價差": "price_change",
     }
     df = df.rename(columns=rename_map)
-    for column in ["date", "stock_id", "open_price", "high_price", "low_price", "close_price", "trading_volume", "trading_money"]:
+    for column in ["date", "stock_id", "open_price", "high_price", "low_price", "close_price", "price_change", "trading_volume", "trading_money", "transaction_count"]:
         if column not in df.columns:
             df[column] = pd.NA
 
-    df["date"] = pd.to_datetime(df["date"])
+    df["date"] = df["date"].map(_parse_twse_date)
     df["stock_id"] = df["stock_id"].astype(str)
-    numeric_cols = ["open_price", "high_price", "low_price", "close_price", "trading_volume", "trading_money"]
+    numeric_cols = ["open_price", "high_price", "low_price", "close_price", "price_change", "trading_volume", "trading_money", "transaction_count"]
+    for column in numeric_cols:
+        df[column] = (
+            df[column]
+            .astype(str)
+            .str.replace(",", "", regex=False)
+            .str.replace("+", "", regex=False)
+            .replace({"--": pd.NA, "-": pd.NA, "nan": pd.NA, "": pd.NA})
+        )
     df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
+    df = df.dropna(subset=["date", "stock_id"])
+    df = df.drop_duplicates(["stock_id", "date"], keep="last")
     df = df.sort_values(["stock_id", "date"])
 
     grouped = df.groupby("stock_id", group_keys=False)

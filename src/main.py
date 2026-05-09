@@ -4,13 +4,13 @@ import argparse
 from pathlib import Path
 
 import pandas as pd
+from pandas.errors import EmptyDataError
 
-from src.api.finmind_client import FinMindClient
 from src.config import DEFAULT_START_DATE, GOLD_DIR, RAW_DIR, SILVER_DIR, bootstrap_environment, default_end_date, load_stocks
-from src.extract.extract_finmind import extract_all
+from src.extract.extract_twse import extract_all_twse
 from src.load.local_storage import load_tables_to_duckdb, read_table, write_table
-from src.transform.company import build_silver_company
-from src.transform.financial_metrics import transform_financial_statement, transform_per_dividend
+from src.transform.company import transform_twse_company_info
+from src.transform.financial_metrics import build_fundamental_metrics, transform_financial_statement, transform_per_dividend
 from src.transform.health_score import append_health_scores
 from src.transform.monthly_revenue import transform_monthly_revenue
 from src.transform.peer_comparison import build_semiconductor_peer_comparison
@@ -35,26 +35,58 @@ def _concat_raw(dataset: str, stock_ids: list[str]) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
+def _read_raw_dataset(dataset: str) -> pd.DataFrame:
+    path = RAW_DIR / f"{dataset}.csv"
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(path)
+    except EmptyDataError:
+        return pd.DataFrame()
+
+
 def run_extract(start_date: str = DEFAULT_START_DATE, end_date: str | None = None) -> None:
     bootstrap_environment()
-    stocks = load_stocks()
-    extract_all(stocks, start_date=start_date, end_date=end_date or default_end_date(), client=FinMindClient())
+    extract_all_twse()
 
 
 def run_transform() -> None:
     bootstrap_environment()
     stocks = load_stocks()
     stock_ids = [stock.stock_id for stock in stocks]
-    write_table(build_silver_company(stocks), "silver_company", SILVER_DIR)
-    write_table(transform_stock_price(_concat_raw("TaiwanStockPrice", stock_ids)), "silver_stock_price", SILVER_DIR)
-    write_table(transform_monthly_revenue(_concat_raw("TaiwanStockMonthRevenue", stock_ids)), "silver_monthly_revenue", SILVER_DIR)
-    financial_frames = [
-        _concat_raw("TaiwanStockFinancialStatements", stock_ids),
-        _concat_raw("TaiwanStockBalanceSheet", stock_ids),
-        _concat_raw("TaiwanStockCashFlowsStatement", stock_ids),
-    ]
+    write_table(transform_twse_company_info(_read_raw_dataset("TWSECompanyInfo"), stocks), "silver_company", SILVER_DIR)
+    price_raw = _read_raw_dataset("TWSEStockDayAll")
+    if price_raw.empty:
+        price_raw = _concat_raw("TaiwanStockPrice", stock_ids)
+    write_table(transform_stock_price(price_raw), "silver_stock_price", SILVER_DIR)
+    revenue_raw = _read_raw_dataset("TWSEMonthlyRevenue")
+    if revenue_raw.empty:
+        revenue_raw = _concat_raw("TaiwanStockMonthRevenue", stock_ids)
+    write_table(transform_monthly_revenue(revenue_raw), "silver_monthly_revenue", SILVER_DIR)
+    financial_frames = []
+    for dataset, category, table_name in [
+        ("TWSEIncomeStatement", "income_statement", "silver_income_statement"),
+        ("TWSEBalanceSheet", "balance_sheet", "silver_balance_sheet"),
+        ("TWSECashFlowStatement", "cash_flow_statement", "silver_cash_flow_statement"),
+    ]:
+        frame = _read_raw_dataset(dataset)
+        if not frame.empty:
+            frame["statement_category"] = category
+        transformed = transform_financial_statement(frame)
+        write_table(transformed, table_name, SILVER_DIR)
+        if not transformed.empty:
+            financial_frames.append(transformed)
     financial_raw = pd.concat([df for df in financial_frames if not df.empty], ignore_index=True) if any(not df.empty for df in financial_frames) else pd.DataFrame()
-    write_table(transform_financial_statement(financial_raw), "silver_financial_statement", SILVER_DIR)
+    write_table(financial_raw, "silver_financial_statement", SILVER_DIR)
+    write_table(
+        build_fundamental_metrics(
+            read_table("silver_income_statement", SILVER_DIR),
+            read_table("silver_balance_sheet", SILVER_DIR),
+            read_table("silver_cash_flow_statement", SILVER_DIR),
+        ),
+        "silver_fundamental_metrics",
+        SILVER_DIR,
+    )
     write_table(
         transform_per_dividend(_concat_raw("TaiwanStockPER", stock_ids), _concat_raw("TaiwanStockDividend", stock_ids)),
         "silver_per_dividend",
@@ -68,6 +100,7 @@ def run_build_gold() -> None:
     price = read_table("silver_stock_price", SILVER_DIR)
     revenue = read_table("silver_monthly_revenue", SILVER_DIR)
     per_dividend = read_table("silver_per_dividend", SILVER_DIR)
+    fundamentals = read_table("silver_fundamental_metrics", SILVER_DIR)
 
     monthly_price = latest_monthly_price_features(price)
     if not monthly_price.empty:
@@ -75,6 +108,9 @@ def run_build_gold() -> None:
     if not per_dividend.empty:
         per_dividend["month"] = pd.to_datetime(per_dividend["date"], errors="coerce").dt.to_period("M").astype(str)
         per_dividend = per_dividend.sort_values("date").groupby(["stock_id", "month"], as_index=False).last()
+    if not fundamentals.empty:
+        fundamentals["month"] = pd.to_datetime(fundamentals["date"], errors="coerce").dt.to_period("M").astype(str)
+        fundamentals = fundamentals.sort_values("date").groupby(["stock_id", "month"], as_index=False).last()
 
     snapshot = revenue.merge(company, on="stock_id", how="left")
     price_cols = [
@@ -89,6 +125,8 @@ def run_build_gold() -> None:
     snapshot = snapshot.merge(monthly_price[price_cols] if not monthly_price.empty else pd.DataFrame(columns=price_cols), on=["stock_id", "month"], how="left")
     per_cols = ["stock_id", "month", "pe_ratio", "dividend_yield", "price_book_ratio"]
     snapshot = snapshot.merge(per_dividend[per_cols] if not per_dividend.empty else pd.DataFrame(columns=per_cols), on=["stock_id", "month"], how="left")
+    fundamental_cols = ["stock_id", "month", "roe", "roa", "gross_margin", "operating_margin", "debt_ratio", "current_ratio", "eps"]
+    snapshot = snapshot.merge(fundamentals[fundamental_cols] if not fundamentals.empty else pd.DataFrame(columns=fundamental_cols), on=["stock_id", "month"], how="left")
     snapshot = append_health_scores(snapshot)
 
     company_monthly_cols = [
@@ -105,6 +143,13 @@ def run_build_gold() -> None:
         "revenue_yoy",
         "pe_ratio",
         "dividend_yield",
+        "roe",
+        "roa",
+        "gross_margin",
+        "operating_margin",
+        "debt_ratio",
+        "current_ratio",
+        "eps",
         "volatility_20d",
         "price_above_ma20_flag",
         "price_above_ma60_flag",
@@ -124,7 +169,15 @@ def run_build_gold() -> None:
         "stock_name",
         "industry_group",
         "close_price",
+        "open_price",
+        "high_price",
+        "low_price",
+        "price_change",
+        "trading_volume",
+        "trading_money",
+        "transaction_count",
         "daily_return",
+        "monthly_return",
         "ma_20",
         "ma_60",
         "volatility_20d",
@@ -132,6 +185,59 @@ def run_build_gold() -> None:
         "price_above_ma60_flag",
     ]
     write_table(stock_features[stock_feature_cols] if not stock_features.empty else pd.DataFrame(columns=stock_feature_cols), "gold_stock_price_features", GOLD_DIR)
+
+    latest_price = price.sort_values("date").groupby("stock_id", as_index=False).last() if not price.empty else pd.DataFrame()
+    latest_price_cols = [
+        "stock_id",
+        "date",
+        "open_price",
+        "high_price",
+        "low_price",
+        "close_price",
+        "price_change",
+        "trading_volume",
+        "trading_money",
+        "transaction_count",
+        "daily_return",
+        "monthly_return",
+        "volatility_20d",
+        "ma_20",
+        "ma_60",
+        "price_above_ma20_flag",
+        "price_above_ma60_flag",
+    ]
+    operating_dashboard = gold_company.merge(
+        latest_price[latest_price_cols] if not latest_price.empty else pd.DataFrame(columns=["stock_id"]),
+        on="stock_id",
+        how="left",
+        suffixes=("", "_latest_price"),
+    )
+    for column in ["close_price", "monthly_return", "volatility_20d", "price_above_ma20_flag", "price_above_ma60_flag"]:
+        latest_col = f"{column}_latest_price"
+        if latest_col in operating_dashboard.columns:
+            operating_dashboard[column] = operating_dashboard[column].combine_first(operating_dashboard[latest_col])
+            operating_dashboard = operating_dashboard.drop(columns=[latest_col])
+    if "date" in operating_dashboard.columns:
+        operating_dashboard = operating_dashboard.rename(columns={"date": "latest_price_date"})
+    latest_fundamentals = read_table("silver_fundamental_metrics", SILVER_DIR)
+    if not latest_fundamentals.empty:
+        latest_fundamentals = latest_fundamentals.sort_values("date").groupby("stock_id", as_index=False).last()
+        operating_dashboard = operating_dashboard.merge(
+            latest_fundamentals[["stock_id", "date", "roe", "roa", "gross_margin", "operating_margin", "debt_ratio", "current_ratio", "eps"]],
+            on="stock_id",
+            how="left",
+            suffixes=("", "_latest_fundamental"),
+        )
+        for column in ["roe", "roa", "gross_margin", "operating_margin", "debt_ratio", "current_ratio", "eps"]:
+            latest_col = f"{column}_latest_fundamental"
+            if latest_col in operating_dashboard.columns:
+                operating_dashboard[column] = operating_dashboard[column].combine_first(operating_dashboard[latest_col])
+                operating_dashboard = operating_dashboard.drop(columns=[latest_col])
+        if "date" in operating_dashboard.columns:
+            operating_dashboard = operating_dashboard.rename(columns={"date": "latest_fundamental_date"})
+        if "date_latest_fundamental" in operating_dashboard.columns:
+            operating_dashboard = operating_dashboard.rename(columns={"date_latest_fundamental": "latest_fundamental_date"})
+    write_table(operating_dashboard, "gold_operating_dashboard", GOLD_DIR)
 
     revenue_growth_cols = ["month", "stock_id", "stock_name", "industry_group", "revenue", "revenue_mom", "revenue_yoy", "revenue_growth_signal"]
     for column in revenue_growth_cols:
