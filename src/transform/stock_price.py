@@ -25,10 +25,24 @@ SILVER_STOCK_PRICE_COLUMNS = [
 
 def _parse_twse_date(value: object) -> pd.Timestamp:
     text = str(value).strip()
+    if "/" in text:
+        parts = text.split("/")
+        if len(parts) == 3 and parts[0].isdigit():
+            year = int(parts[0])
+            if year < 1911:
+                year += 1911
+            return pd.Timestamp(year=year, month=int(parts[1]), day=int(parts[2]))
     if text.isdigit() and len(text) == 7:
         year = int(text[:3]) + 1911
         return pd.Timestamp(year=year, month=int(text[3:5]), day=int(text[5:7]))
     return pd.to_datetime(value, errors="coerce")
+
+
+def _normalize_stock_id(value: object) -> str:
+    text = str(value).strip()
+    if text.endswith(".0"):
+        text = text[:-2]
+    return text
 
 
 def transform_stock_price(raw_df: pd.DataFrame) -> pd.DataFrame:
@@ -41,6 +55,7 @@ def transform_stock_price(raw_df: pd.DataFrame) -> pd.DataFrame:
         "Code": "stock_id",
         "證券代號": "stock_id",
         "date": "date",
+        "日期": "date",
         "snapshot_date": "date",
         "Trading_Volume": "trading_volume",
         "TradeVolume": "trading_volume",
@@ -64,14 +79,17 @@ def transform_stock_price(raw_df: pd.DataFrame) -> pd.DataFrame:
         "收盤價": "close_price",
         "Change": "price_change",
         "漲跌價差": "price_change",
+        "spread": "price_change",
+        "Trading_turnover": "transaction_count",
     }
     df = df.rename(columns=rename_map)
+    df = df.T.groupby(level=0).first().T
     for column in ["date", "stock_id", "open_price", "high_price", "low_price", "close_price", "price_change", "trading_volume", "trading_money", "transaction_count"]:
         if column not in df.columns:
             df[column] = pd.NA
 
     df["date"] = df["date"].map(_parse_twse_date)
-    df["stock_id"] = df["stock_id"].astype(str)
+    df["stock_id"] = df["stock_id"].map(_normalize_stock_id)
     numeric_cols = ["open_price", "high_price", "low_price", "close_price", "price_change", "trading_volume", "trading_money", "transaction_count"]
     for column in numeric_cols:
         df[column] = (
@@ -87,7 +105,7 @@ def transform_stock_price(raw_df: pd.DataFrame) -> pd.DataFrame:
     df = df.sort_values(["stock_id", "date"])
 
     grouped = df.groupby("stock_id", group_keys=False)
-    df["daily_return"] = grouped["close_price"].pct_change()
+    df["daily_return"] = grouped["close_price"].pct_change(fill_method=None)
     df["ma_20"] = grouped["close_price"].transform(lambda s: s.rolling(20, min_periods=1).mean())
     df["ma_60"] = grouped["close_price"].transform(lambda s: s.rolling(60, min_periods=1).mean())
     df["volatility_20d"] = grouped["daily_return"].transform(lambda s: s.rolling(20, min_periods=2).std())
@@ -98,7 +116,7 @@ def transform_stock_price(raw_df: pd.DataFrame) -> pd.DataFrame:
         .tail(1)[["stock_id", "month", "close_price"]]
         .sort_values(["stock_id", "month"])
     )
-    month_end_close["monthly_return"] = month_end_close.groupby("stock_id")["close_price"].pct_change()
+    month_end_close["monthly_return"] = month_end_close.groupby("stock_id")["close_price"].pct_change(fill_method=None)
     df = df.merge(month_end_close[["stock_id", "month", "monthly_return"]], on=["stock_id", "month"], how="left")
     df["price_above_ma20_flag"] = df["close_price"] > df["ma_20"]
     df["price_above_ma60_flag"] = df["close_price"] > df["ma_60"]

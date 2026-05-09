@@ -7,7 +7,7 @@ import pandas as pd
 from pandas.errors import EmptyDataError
 
 from src.config import DEFAULT_START_DATE, GOLD_DIR, RAW_DIR, SILVER_DIR, bootstrap_environment, default_end_date, load_stocks
-from src.extract.extract_twse import extract_all_twse
+from src.extract.extract_twse import extract_all_twse, extract_twse_stock_day_history
 from src.load.local_storage import load_tables_to_duckdb, read_table, write_table
 from src.transform.company import transform_twse_company_info
 from src.transform.financial_metrics import build_fundamental_metrics, transform_financial_statement, transform_per_dividend
@@ -55,14 +55,21 @@ def run_transform() -> None:
     stocks = load_stocks()
     stock_ids = [stock.stock_id for stock in stocks]
     write_table(transform_twse_company_info(_read_raw_dataset("TWSECompanyInfo"), stocks), "silver_company", SILVER_DIR)
-    price_raw = _read_raw_dataset("TWSEStockDayAll")
-    if price_raw.empty:
-        price_raw = _concat_raw("TaiwanStockPrice", stock_ids)
-    write_table(transform_stock_price(price_raw), "silver_stock_price", SILVER_DIR)
-    revenue_raw = _read_raw_dataset("TWSEMonthlyRevenue")
-    if revenue_raw.empty:
-        revenue_raw = _concat_raw("TaiwanStockMonthRevenue", stock_ids)
-    write_table(transform_monthly_revenue(revenue_raw), "silver_monthly_revenue", SILVER_DIR)
+    price_frames = [_read_raw_dataset("TWSEStockDayAll"), _concat_raw("TWSEStockDayHistory", stock_ids), _concat_raw("TaiwanStockPrice", stock_ids)]
+    price_frames = [df for df in price_frames if not df.empty]
+    price_raw = pd.concat(price_frames, ignore_index=True) if price_frames else pd.DataFrame()
+    silver_price = transform_stock_price(price_raw)
+    if not silver_price.empty:
+        silver_price = silver_price[pd.to_datetime(silver_price["date"], errors="coerce") >= pd.Timestamp(DEFAULT_START_DATE)]
+    write_table(silver_price, "silver_stock_price", SILVER_DIR)
+    revenue_frames = [_read_raw_dataset("TWSEMonthlyRevenue"), _concat_raw("TaiwanStockMonthRevenue", stock_ids)]
+    revenue_frames = [df for df in revenue_frames if not df.empty]
+    revenue_raw = pd.concat(revenue_frames, ignore_index=True) if revenue_frames else pd.DataFrame()
+    silver_revenue = transform_monthly_revenue(revenue_raw)
+    if not silver_revenue.empty:
+        start_month = pd.Timestamp(DEFAULT_START_DATE).to_period("M").strftime("%Y-%m")
+        silver_revenue = silver_revenue[silver_revenue["month"].astype(str).ge(start_month)]
+    write_table(silver_revenue, "silver_monthly_revenue", SILVER_DIR)
     financial_frames = []
     for dataset, category, table_name in [
         ("TWSEIncomeStatement", "income_statement", "silver_income_statement"),
@@ -288,13 +295,18 @@ def run_all(start_date: str = DEFAULT_START_DATE, end_date: str | None = None) -
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Taiwan Stock Fundamental & Price Intelligence Platform")
-    parser.add_argument("command", choices=["extract", "transform", "build-gold", "load-duckdb", "run-all"])
+    parser.add_argument("command", choices=["extract", "extract-history", "transform", "build-gold", "load-duckdb", "run-all"])
     parser.add_argument("--start-date", default=DEFAULT_START_DATE)
     parser.add_argument("--end-date", default=None)
+    parser.add_argument("--stock-id", action="append", dest="stock_ids", default=None)
     args = parser.parse_args()
 
     if args.command == "extract":
         run_extract(start_date=args.start_date, end_date=args.end_date)
+    elif args.command == "extract-history":
+        bootstrap_environment()
+        stock_ids = args.stock_ids or [stock.stock_id for stock in load_stocks()]
+        extract_twse_stock_day_history(stock_ids, start_date=args.start_date, end_date=args.end_date)
     elif args.command == "transform":
         run_transform()
     elif args.command == "build-gold":

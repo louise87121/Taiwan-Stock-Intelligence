@@ -11,7 +11,7 @@ def test_semiconductor_peer_ranking_and_winbond_config():
             "month": ["2024-01", "2024-01", "2024-01"],
             "stock_id": ["2344", "2330", "2881"],
             "stock_name": ["華邦電", "台積電", "富邦金"],
-            "industry_group": ["Semiconductor", "Semiconductor", "Financials"],
+            "industry_group": ["Semiconductor", "24", "Financials"],
             "revenue": [100, 200, 300],
             "revenue_yoy": [0.2, 0.1, 0.5],
             "monthly_return": [0.03, 0.01, 0.2],
@@ -31,4 +31,3 @@ def test_semiconductor_peer_ranking_and_winbond_config():
     winbond = [stock for stock in config["stocks"] if stock["stock_id"] == "2344"][0]
     assert winbond["stock_name"] == "華邦電"
     assert winbond["focus_flag"] is True
-

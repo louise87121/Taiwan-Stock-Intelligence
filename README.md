@@ -1,16 +1,16 @@
-# Taiwan Stock Fundamental & Price Intelligence Platform
+# Taiwan Top Fundamental & Price Intelligence Platform
 
-台股基本面與股價智慧分析平台是一個 value-oriented data engineering MVP side project。它使用 TWSE OpenAPI 擷取台灣上市公司的每日股價、月營收、財務資料與公司基本資料，整理為 silver/gold analytical tables，並輸出適合 DuckDB、Power BI 與 Streamlit Web App 使用的資料集。
+台股基本面與股價智慧分析平台是一個 value-oriented data engineering MVP side project。它使用 TWSE OpenAPI 擷取台灣上市公司的每日股價、月營收、財務資料與公司基本資料，整理為 silver/gold analytical tables，並在 Streamlit App 中呈現高流動性台股公司的近五年營運與股價趨勢。
 
 > Disclaimer: 本專案僅作為資料工程與分析 side project，不構成投資建議。Financial Health Score 是 MVP scoring logic，用於展示資料產品設計，不應直接作為買賣依據。
 
 ## Business Objective
 
-本專案協助使用者比較台灣上市公司營運表現、分析股價趨勢、追蹤月營收 YoY/MoM、評估財務健康程度、監控風險訊號，並支援半導體產業同業比較。初始股票清單涵蓋半導體、金融、電信、塑化、鋼鐵與民生消費等代表性公司。
+本專案協助使用者比較台灣高流動性公司營運表現、分析股價趨勢、追蹤月營收 YoY/MoM、評估財務健康程度、監控風險訊號，並支援產業同業比較。MVP 的分析 universe 以最新交易日 `trading_money` 排名前段公司為主，資料窗口預設為近五年。
 
 ## Web App Overview
 
-`app.py` 是 Streamlit 入口檔案，展示 `data/gold/` analytical tables。Web app 保留資料工程架構：TWSE OpenAPI extraction、silver transformation、gold marts 與 DuckDB loading 由 `src/` CLI 負責，Streamlit 只讀取 silver/gold layer 並呈現互動式分析。
+`app.py` 是 Streamlit 入口檔案，展示 `data/gold/` analytical tables。Web app 保留資料工程架構：TWSE OpenAPI extraction、silver transformation、gold marts 與 DuckDB loading 由 `src/` CLI 負責，Streamlit 只讀取 silver/gold layer，並預設呈現近五年資料。
 
 App pages:
 
@@ -226,7 +226,7 @@ Risk levels:
 
 ## Semiconductor Peer Comparison
 
-`gold_semiconductor_peer_comparison` filters `industry_group = Semiconductor` from `stocks.yml`. For each month it ranks:
+`gold_semiconductor_peer_comparison` filters semiconductor companies from the company master table. The MVP supports `Semiconductor`, `半導體業`, and TWSE industry code `24`. For each month it ranks:
 
 - `revenue_yoy_rank`: higher YoY is better.
 - `monthly_return_rank`: higher monthly return is better.
@@ -249,7 +249,7 @@ Risk levels:
 The Streamlit app uses wide layout, sidebar navigation, company/month/industry filters, metric cards, sortable dataframes, and Plotly charts.
 
 1. Executive Overview: summarizes latest health score, risk counts, Revenue YoY Top 10, Health Score Top 10, and high-risk companies.
-2. Company Analysis: selected company page with six areas: company profile, monthly revenue, income statement, balance sheet, cash flow statement, and daily stock price.
+2. Company Analysis: selected company page with company profile, monthly revenue, and monthly stock price.
 3. Semiconductor Peer Comparison: compares semiconductor peers using revenue growth, return, volatility, valuation, and ranks.
 4. Revenue Growth Analysis: focuses on revenue trend, YoY momentum, growth signals, and top/bottom movers.
 5. Risk Monitoring: highlights High Risk and Watch companies plus weak revenue/price trend and high volatility signals.

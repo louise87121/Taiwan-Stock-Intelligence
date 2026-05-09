@@ -16,7 +16,7 @@ RAW_DIR = DATA_DIR / "raw"
 SILVER_DIR = DATA_DIR / "silver"
 GOLD_DIR = DATA_DIR / "gold"
 DUCKDB_PATH = DATA_DIR / "taiwan_stock_intelligence.duckdb"
-DEFAULT_START_DATE = "2021-01-01"
+DEFAULT_START_DATE = "2021-05-01"
 
 
 @dataclass(frozen=True)
@@ -47,4 +47,3 @@ def load_stocks(path: Path | None = None) -> list[StockConfig]:
 
 def stocks_to_frame(stocks: list[StockConfig]) -> pd.DataFrame:
     return pd.DataFrame([stock.__dict__ for stock in stocks])
-

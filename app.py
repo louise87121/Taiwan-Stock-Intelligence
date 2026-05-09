@@ -8,10 +8,46 @@ import plotly.express as px
 import streamlit as st
 
 
-APP_TITLE = "Taiwan Stock Fundamental & Price Intelligence App"
+APP_TITLE = "Taiwan Top Fundamental & Price Intelligence App"
 PROJECT_ROOT = Path(__file__).resolve().parent
 GOLD_DIR = PROJECT_ROOT / "data" / "gold"
 SILVER_DIR = PROJECT_ROOT / "data" / "silver"
+
+TWSE_INDUSTRY_LABELS = {
+    "1": "Cement",
+    "2": "Food",
+    "3": "Plastics",
+    "4": "Textiles",
+    "5": "Electric Machinery",
+    "6": "Electrical and Cable",
+    "8": "Glass and Ceramics",
+    "9": "Paper and Pulp",
+    "10": "Iron and Steel",
+    "11": "Rubber",
+    "12": "Automobile",
+    "14": "Building Material and Construction",
+    "15": "Shipping and Transportation",
+    "16": "Tourism",
+    "17": "Financial and Insurance",
+    "18": "Trading and Consumers' Goods",
+    "20": "Other",
+    "21": "Chemical",
+    "22": "Biotechnology and Medical Care",
+    "23": "Oil, Gas and Electricity",
+    "24": "Semiconductor",
+    "25": "Computer and Peripheral Equipment",
+    "26": "Optoelectronic",
+    "27": "Communications and Internet",
+    "28": "Electronic Parts and Components",
+    "29": "Electronic Products Distribution",
+    "30": "Information Service",
+    "31": "Other Electronic",
+    "35": "Green Energy and Environmental Services",
+    "36": "Digital and Cloud Services",
+    "37": "Sports and Leisure",
+    "38": "Household",
+    "91": "Taiwan Depositary Receipts",
+}
 
 
 st.set_page_config(page_title=APP_TITLE, layout="wide")
@@ -95,6 +131,35 @@ def normalize_types(df: pd.DataFrame) -> pd.DataFrame:
     return normalized
 
 
+def get_app_universe_stock_ids(operating_dashboard: pd.DataFrame) -> list[str]:
+    if operating_dashboard.empty or "stock_id" not in operating_dashboard.columns:
+        return []
+    df = operating_dashboard.copy()
+    if "latest_price_date" in df.columns:
+        df["latest_price_date"] = pd.to_datetime(df["latest_price_date"], errors="coerce")
+    else:
+        df["latest_price_date"] = pd.NaT
+    if "trading_money" not in df.columns:
+        df["trading_money"] = 0
+    df["trading_money"] = pd.to_numeric(df["trading_money"], errors="coerce").fillna(0)
+    latest = (
+        df.sort_values(["latest_price_date", "trading_money"], ascending=[False, False])
+        .drop_duplicates("stock_id", keep="first")
+        .sort_values("trading_money", ascending=False)
+        .head(20)
+    )
+    stock_ids = latest["stock_id"].astype(str).tolist()
+    if "2344" in df["stock_id"].astype(str).values and "2344" not in stock_ids:
+        stock_ids.append("2344")
+    return stock_ids
+
+
+def filter_app_universe(df: pd.DataFrame, universe_stock_ids: list[str]) -> pd.DataFrame:
+    if df.empty or not universe_stock_ids or "stock_id" not in df.columns:
+        return df
+    return df[df["stock_id"].astype(str).isin(universe_stock_ids)].copy()
+
+
 def latest_month(df: pd.DataFrame) -> str | None:
     if df.empty or "month" not in df.columns:
         return None
@@ -109,10 +174,41 @@ def filter_month_range(df: pd.DataFrame, month_range: tuple[str, str] | None) ->
     return df[df["month"].between(start_month, end_month)].copy()
 
 
+def months_from_frame(df: pd.DataFrame) -> list[str]:
+    if df.empty:
+        return []
+    if "month" in df.columns:
+        return df["month"].dropna().astype(str).tolist()
+    if "date" in df.columns:
+        dates = pd.to_datetime(df["date"], errors="coerce")
+        return dates.dropna().dt.to_period("M").astype(str).tolist()
+    return []
+
+
+def monthly_stock_price_features(stock_features: pd.DataFrame) -> pd.DataFrame:
+    if stock_features.empty or "date" not in stock_features.columns:
+        return pd.DataFrame()
+    df = stock_features.copy()
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"]).sort_values(["stock_id", "date"])
+    df["month"] = df["date"].dt.to_period("M").astype(str)
+    idx = df.groupby(["stock_id", "month"], as_index=False).tail(1).index
+    monthly = df.loc[idx].copy()
+    monthly["date"] = monthly["date"].dt.date.astype(str)
+    return monthly.sort_values(["stock_id", "month"])
+
+
 def filter_industry(df: pd.DataFrame, industry_group: str) -> pd.DataFrame:
     if df.empty or industry_group == "All" or "industry_group" not in df.columns:
         return df
     return df[df["industry_group"].eq(industry_group)].copy()
+
+
+def industry_group_label(industry_group: object) -> str:
+    if pd.isna(industry_group):
+        return "Unknown"
+    value = str(industry_group).strip()
+    return TWSE_INDUSTRY_LABELS.get(value, value)
 
 
 def format_percent(value: float | int | None) -> str:
@@ -137,6 +233,8 @@ def format_table(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     formatted = df.copy()
+    if "industry_group" in formatted.columns:
+        formatted["industry_group"] = formatted["industry_group"].map(industry_group_label)
     percent_cols = [
         "revenue_yoy",
         "revenue_mom",
@@ -216,8 +314,18 @@ def line_chart(df: pd.DataFrame, x: str, y: str, title: str, color: str | None =
     if df.empty or x not in df.columns or y not in df.columns:
         show_empty_state(f"No data available for {title}.")
         return
-    fig = px.line(df, x=x, y=y, color=color, markers=True, title=title)
+    chart_df = df.copy()
+    if x == "date":
+        chart_df["month"] = pd.to_datetime(chart_df[x], errors="coerce").dt.to_period("M").astype(str)
+        x = "month"
+    chart_df = chart_df.dropna(subset=[x, y]).sort_values(x)
+    if chart_df.empty:
+        show_empty_state(f"No data available for {title}.")
+        return
+    fig = px.line(chart_df, x=x, y=y, color=color, markers=True, title=title)
     fig.update_layout(xaxis_title="", yaxis_title=y, height=420)
+    if x == "month":
+        fig.update_xaxes(type="category", categoryorder="array", categoryarray=sorted(chart_df[x].dropna().astype(str).unique()))
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -345,7 +453,7 @@ def page_company_analysis(
     cols[4].metric("Revenue YoY", format_percent(latest.get("revenue_yoy")))
     cols[5].metric("EPS", format_price(latest.get("eps")))
 
-    tabs = st.tabs(["公司基本資料", "月營收", "每日股價"])
+    tabs = st.tabs(["公司基本資料", "月營收", "月股價"])
 
     with tabs[0]:
         st.subheader("公司基本資料")
@@ -393,7 +501,9 @@ def page_company_analysis(
         )
         col1, col2 = st.columns(2)
         with col1:
-            line_chart(company, "month", "close_price", f"{company_name} 股價趨勢")
+            profile_price = filter_stock(monthly_stock_price_features(stock_features), stock_id)
+            profile_price = filter_month_range(profile_price, month_range)
+            line_chart(profile_price, "month", "close_price", f"{company_name} 月股價趨勢")
         with col2:
             if not industry_rank.empty:
                 rank_value_cols = [
@@ -403,7 +513,7 @@ def page_company_analysis(
                     "industry_volatility_rank",
                 ]
                 rank_long = industry_rank[["month", *rank_value_cols]].melt(id_vars="month", var_name="rank_type", value_name="rank")
-                industry_name = industry_rank["industry_group"].dropna().iloc[-1]
+                industry_name = industry_group_label(industry_rank["industry_group"].dropna().iloc[-1])
                 line_chart(rank_long, "month", "rank", f"{company_name} {industry_name} Peer Ranks", "rank_type")
             else:
                 show_empty_state("No industry peer rank is available for the selected company.")
@@ -453,27 +563,28 @@ def page_company_analysis(
         scatter_chart(relation, "revenue_yoy", "close_price", f"{company_name} 股價與月營收 YoY 關聯")
 
     with tabs[2]:
-        st.subheader("每日股價")
-        company_price = filter_stock(stock_features, stock_id)
-        if not company_price.empty:
-            company_price["month"] = pd.to_datetime(company_price["date"], errors="coerce").dt.to_period("M").astype(str)
-            company_price = filter_month_range(company_price, month_range)
+        st.subheader("月股價")
+        company_price = filter_stock(monthly_stock_price_features(stock_features), stock_id)
+        company_price = filter_month_range(company_price, month_range)
         if company_price.empty:
-            show_empty_state("No daily stock price data is available for the selected company.")
+            show_empty_state("No monthly stock price data is available for the selected company.")
         else:
             col1, col2 = st.columns(2)
             with col1:
-                line_chart(company_price, "date", "close_price", f"{company_name} Close Price")
+                line_chart(company_price, "month", "close_price", f"{company_name} Monthly Close Price")
             with col2:
-                line_chart(company_price, "date", "volatility_20d", f"{company_name} 20D Volatility")
-            line_chart(company_price, "date", "daily_return", f"{company_name} 日報酬率")
-            st.dataframe(format_table(company_price.sort_values("date", ascending=False)), use_container_width=True, hide_index=True)
+                line_chart(company_price, "month", "volatility_20d", f"{company_name} Monthly 20D Volatility")
+            line_chart(company_price, "month", "monthly_return", f"{company_name} 月報酬率")
+            st.dataframe(format_table(company_price.sort_values("month", ascending=False)), use_container_width=True, hide_index=True)
 
 
 def page_semiconductor_peer_comparison(peers: pd.DataFrame, month_range: tuple[str, str] | None) -> None:
     st.title("Semiconductor Peer Comparison")
     st.caption("Business interpretation: this view compares semiconductor companies by revenue momentum, market reaction, volatility, valuation, and health ranking.")
     df = filter_month_range(peers, month_range)
+    if df.empty and not peers.empty:
+        st.info("No semiconductor peer rows are available in the selected month range. Showing the latest available semiconductor peer data instead.")
+        df = peers.copy()
     lm = latest_month(df)
     latest = df[df["month"].eq(lm)].copy() if lm else pd.DataFrame()
     if latest.empty:
@@ -602,22 +713,44 @@ def main() -> None:
     revenue_growth = normalize_types(load_gold_table("gold_revenue_growth"))
     peers = normalize_types(load_gold_table("gold_semiconductor_peer_comparison"))
 
+    universe_stock_ids = get_app_universe_stock_ids(operating_dashboard)
+    snapshot = filter_app_universe(snapshot, universe_stock_ids)
+    operating_dashboard = filter_app_universe(operating_dashboard, universe_stock_ids)
+    stock_features = filter_app_universe(stock_features, universe_stock_ids)
+    revenue_growth = filter_app_universe(revenue_growth, universe_stock_ids)
+
     base_for_filters = operating_dashboard if not operating_dashboard.empty else (snapshot if not snapshot.empty else revenue_growth)
     stock_options = sorted(base_for_filters["stock_id"].dropna().astype(str).unique()) if "stock_id" in base_for_filters.columns else []
-    stock_id = st.sidebar.selectbox("Company stock_id", stock_options) if stock_options else ""
+    default_stock_index = stock_options.index("2330") if "2330" in stock_options else 0
+    stock_id = st.sidebar.selectbox("Company stock_id", stock_options, index=default_stock_index) if stock_options else ""
 
     industry_options = ["All"]
     if "industry_group" in base_for_filters.columns and not base_for_filters.empty:
-        industry_options += sorted(base_for_filters["industry_group"].dropna().astype(str).unique())
-    industry_group = st.sidebar.selectbox("Industry Group", industry_options)
+        industry_options += sorted(
+            base_for_filters["industry_group"].dropna().astype(str).unique(),
+            key=industry_group_label,
+        )
+    industry_group = st.sidebar.selectbox(
+        "Industry Group",
+        industry_options,
+        format_func=lambda value: "All Industries" if value == "All" else industry_group_label(value),
+    )
 
-    month_options = sorted(base_for_filters["month"].dropna().astype(str).unique()) if "month" in base_for_filters.columns else []
+    month_options = sorted(
+        set(months_from_frame(operating_dashboard) + months_from_frame(stock_features) + months_from_frame(revenue_growth))
+    )
     month_range = None
-    if month_options:
-        selected_months = st.sidebar.select_slider("Month Range", options=month_options, value=(month_options[0], month_options[-1]))
+    if len(month_options) > 1:
+        five_year_start = (pd.Timestamp.today() - pd.DateOffset(years=5)).to_period("M").strftime("%Y-%m")
+        default_start_month = next((month for month in month_options if month >= five_year_start), month_options[0])
+        selected_months = st.sidebar.select_slider("Month Range", options=month_options, value=(default_start_month, month_options[-1]))
         month_range = selected_months if isinstance(selected_months, tuple) else (selected_months, selected_months)
+    elif len(month_options) == 1:
+        month_range = (month_options[0], month_options[0])
+        st.sidebar.caption(f"Month Range: {month_options[0]}")
 
     st.sidebar.divider()
+    st.sidebar.caption(f"Universe: Taiwan top coverage by latest trading money ({len(universe_stock_ids)} stocks)")
     st.sidebar.caption("Data source: TWSE OpenAPI")
     st.sidebar.caption("Disclaimer: This project is a data engineering and analytics side project. It is not investment advice.")
 

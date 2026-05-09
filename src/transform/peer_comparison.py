@@ -21,11 +21,18 @@ PEER_COLUMNS = [
 ]
 
 
+def is_semiconductor_industry(industry_group: pd.Series) -> pd.Series:
+    normalized = industry_group.astype(str).str.strip()
+    return normalized.isin(["Semiconductor", "半導體業", "24"]) | normalized.str.contains("半導體", na=False)
+
+
 def build_semiconductor_peer_comparison(gold_company_monthly_snapshot: pd.DataFrame) -> pd.DataFrame:
     if gold_company_monthly_snapshot.empty:
         return pd.DataFrame(columns=PEER_COLUMNS)
     df = gold_company_monthly_snapshot.copy()
-    df = df[df["industry_group"].eq("Semiconductor")].copy()
+    if "industry_group" not in df.columns:
+        return pd.DataFrame(columns=PEER_COLUMNS)
+    df = df[is_semiconductor_industry(df["industry_group"])].copy()
     if df.empty:
         return pd.DataFrame(columns=PEER_COLUMNS)
     df["revenue_yoy_rank"] = df.groupby("month")["revenue_yoy"].rank(ascending=False, method="min")
@@ -33,4 +40,3 @@ def build_semiconductor_peer_comparison(gold_company_monthly_snapshot: pd.DataFr
     df["health_score_rank"] = df.groupby("month")["financial_health_score"].rank(ascending=False, method="min")
     df["volatility_rank"] = df.groupby("month")["volatility_20d"].rank(ascending=True, method="min")
     return df[PEER_COLUMNS].sort_values(["month", "health_score_rank", "stock_id"])
-
