@@ -30,4 +30,3 @@ def test_semiconductor_peer_ranking_and_winbond_config():
         config = yaml.safe_load(file)
     winbond = [stock for stock in config["stocks"] if stock["stock_id"] == "2344"][0]
     assert winbond["stock_name"] == "華邦電"
-    assert winbond["focus_flag"] is True

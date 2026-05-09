@@ -1,11 +1,11 @@
 stocks:
-  - stock_id: "2344"
-    stock_name: "華邦電"
-    industry_group: "Semiconductor"
-    market_type: "Listed"
-    focus_flag: true
   - stock_id: "2330"
     stock_name: "台積電"
+    industry_group: "Semiconductor"
+    market_type: "Listed"
+    focus_flag: false
+  - stock_id: "2408"
+    stock_name: "南亞科"
     industry_group: "Semiconductor"
     market_type: "Listed"
     focus_flag: false
@@ -14,64 +14,18 @@ stocks:
     industry_group: "Semiconductor"
     market_type: "Listed"
     focus_flag: false
-  - stock_id: "2303"
-    stock_name: "聯電"
-    industry_group: "Semiconductor"
-    market_type: "Listed"
-    focus_flag: false
   - stock_id: "2317"
     stock_name: "鴻海"
     industry_group: "Electronics Manufacturing"
     market_type: "Listed"
     focus_flag: false
-  - stock_id: "2408"
-    stock_name: "南亞科"
+  - stock_id: "2303"
+    stock_name: "聯電"
     industry_group: "Semiconductor"
     market_type: "Listed"
     focus_flag: false
-  - stock_id: "3711"
-    stock_name: "日月光投控"
+  - stock_id: "2344"
+    stock_name: "華邦電"
     industry_group: "Semiconductor"
     market_type: "Listed"
     focus_flag: false
-  - stock_id: "3034"
-    stock_name: "聯詠"
-    industry_group: "Semiconductor"
-    market_type: "Listed"
-    focus_flag: false
-  - stock_id: "2379"
-    stock_name: "瑞昱"
-    industry_group: "Semiconductor"
-    market_type: "Listed"
-    focus_flag: false
-  - stock_id: "2881"
-    stock_name: "富邦金"
-    industry_group: "Financials"
-    market_type: "Listed"
-    focus_flag: false
-  - stock_id: "2891"
-    stock_name: "中信金"
-    industry_group: "Financials"
-    market_type: "Listed"
-    focus_flag: false
-  - stock_id: "2412"
-    stock_name: "中華電"
-    industry_group: "Telecom"
-    market_type: "Listed"
-    focus_flag: false
-  - stock_id: "1301"
-    stock_name: "台塑"
-    industry_group: "Plastics"
-    market_type: "Listed"
-    focus_flag: false
-  - stock_id: "2002"
-    stock_name: "中鋼"
-    industry_group: "Steel"
-    market_type: "Listed"
-    focus_flag: false
-  - stock_id: "1216"
-    stock_name: "統一"
-    industry_group: "Consumer Staples"
-    market_type: "Listed"
-    focus_flag: false
-

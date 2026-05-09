@@ -6,10 +6,12 @@ from typing import Iterable
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+import yaml
 
 
 APP_TITLE = "Taiwan Stock Intelligence"
 PROJECT_ROOT = Path(__file__).resolve().parent
+CONFIG_PATH = PROJECT_ROOT / "config" / "stocks.yml"
 GOLD_DIR = PROJECT_ROOT / "data" / "gold"
 SILVER_DIR = PROJECT_ROOT / "data" / "silver"
 
@@ -131,7 +133,19 @@ def normalize_types(df: pd.DataFrame) -> pd.DataFrame:
     return normalized
 
 
+@st.cache_data(show_spinner=False)
+def load_config_stock_ids() -> list[str]:
+    if not CONFIG_PATH.exists():
+        return []
+    with CONFIG_PATH.open("r", encoding="utf-8") as file:
+        payload = yaml.safe_load(file) or {}
+    return [str(row.get("stock_id")).strip() for row in payload.get("stocks", []) if row.get("stock_id")]
+
+
 def get_app_universe_stock_ids(operating_dashboard: pd.DataFrame) -> list[str]:
+    configured_stock_ids = load_config_stock_ids()
+    if configured_stock_ids:
+        return configured_stock_ids
     if operating_dashboard.empty or "stock_id" not in operating_dashboard.columns:
         return []
     df = operating_dashboard.copy()
@@ -149,9 +163,45 @@ def get_app_universe_stock_ids(operating_dashboard: pd.DataFrame) -> list[str]:
         .head(20)
     )
     stock_ids = latest["stock_id"].astype(str).tolist()
-    if "2344" in df["stock_id"].astype(str).values and "2344" not in stock_ids:
-        stock_ids.append("2344")
+    for required_stock_id in ["2344"]:
+        if required_stock_id not in stock_ids:
+            stock_ids.append(required_stock_id)
     return stock_ids
+
+
+def keep_stocks_with_enough_data(
+    universe_stock_ids: list[str],
+    snapshot: pd.DataFrame,
+    stock_features: pd.DataFrame,
+    revenue_growth: pd.DataFrame,
+    min_months: int = 12,
+) -> list[str]:
+    if not universe_stock_ids:
+        return []
+
+    def month_counts(df: pd.DataFrame) -> pd.Series:
+        if df.empty or "stock_id" not in df.columns:
+            return pd.Series(dtype="int64")
+        working = df.copy()
+        if "month" not in working.columns and "date" in working.columns:
+            working["month"] = pd.to_datetime(working["date"], errors="coerce").dt.to_period("M").astype(str)
+        if "month" not in working.columns:
+            return pd.Series(dtype="int64")
+        working = working.dropna(subset=["month"])
+        return working.groupby(working["stock_id"].astype(str))["month"].nunique()
+
+    snapshot_counts = month_counts(snapshot)
+    price_counts = month_counts(stock_features)
+    revenue_counts = month_counts(revenue_growth)
+    qualified = []
+    for stock_id in universe_stock_ids:
+        if (
+            snapshot_counts.get(stock_id, 0) >= min_months
+            and price_counts.get(stock_id, 0) >= min_months
+            and revenue_counts.get(stock_id, 0) >= min_months
+        ):
+            qualified.append(stock_id)
+    return qualified
 
 
 def filter_app_universe(df: pd.DataFrame, universe_stock_ids: list[str]) -> pd.DataFrame:
@@ -799,6 +849,12 @@ def main() -> None:
     peers = normalize_types(load_gold_table("gold_semiconductor_peer_comparison"))
 
     universe_stock_ids = get_app_universe_stock_ids(operating_dashboard)
+    universe_stock_ids = keep_stocks_with_enough_data(
+        universe_stock_ids,
+        snapshot=snapshot,
+        stock_features=stock_features,
+        revenue_growth=revenue_growth,
+    )
     snapshot = filter_app_universe(snapshot, universe_stock_ids)
     operating_dashboard = filter_app_universe(operating_dashboard, universe_stock_ids)
     stock_features = filter_app_universe(stock_features, universe_stock_ids)
@@ -813,9 +869,14 @@ def main() -> None:
     stock_id = st.sidebar.selectbox("Company stock_id", stock_options, index=default_stock_index) if stock_options else ""
 
     industry_options = ["All"]
-    if "industry_group" in base_for_filters.columns and not base_for_filters.empty:
+    industry_frames = [df for df in [base_for_filters, stock_features] if not df.empty and "industry_group" in df.columns]
+    if industry_frames:
+        industry_values = pd.concat(
+            [df[["industry_group"]] for df in industry_frames],
+            ignore_index=True,
+        )["industry_group"].dropna().astype(str).unique()
         industry_options += sorted(
-            base_for_filters["industry_group"].dropna().astype(str).unique(),
+            industry_values,
             key=industry_group_label,
         )
     industry_group = st.sidebar.selectbox(

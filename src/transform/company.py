@@ -12,6 +12,8 @@ def build_silver_company(stocks: list[StockConfig]) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=SILVER_COMPANY_COLUMNS)
     df["stock_id"] = df["stock_id"].astype(str)
+    df["industry_group"] = df["industry_group"].astype(str)
+    df["market_type"] = df["market_type"].astype(str)
     return df[SILVER_COMPANY_COLUMNS]
 
 
@@ -31,10 +33,15 @@ def transform_twse_company_info(raw_df: pd.DataFrame, fallback_stocks: list[Stoc
         if column not in df.columns:
             df[column] = pd.NA
     df["stock_id"] = df["stock_id"].astype(str)
+    df["industry_group"] = df["industry_group"].astype(str)
+    df["market_type"] = df["market_type"].astype(str)
     df["focus_flag"] = False
     df = df[SILVER_COMPANY_COLUMNS].drop_duplicates("stock_id", keep="last")
     configured_flags = fallback[["stock_id", "focus_flag"]].drop_duplicates("stock_id")
     df = df.drop(columns=["focus_flag"]).merge(configured_flags, on="stock_id", how="left")
     df["focus_flag"] = df["focus_flag"].fillna(False)
     missing = fallback[~fallback["stock_id"].isin(df["stock_id"])]
-    return pd.concat([df, missing], ignore_index=True).drop_duplicates("stock_id", keep="first")
+    result = pd.concat([df, missing], ignore_index=True).drop_duplicates("stock_id", keep="first")
+    result["industry_group"] = result["industry_group"].astype(str)
+    result["market_type"] = result["market_type"].astype(str)
+    return result

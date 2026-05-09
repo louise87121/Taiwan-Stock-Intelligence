@@ -60,6 +60,7 @@ def run_transform() -> None:
     price_raw = pd.concat(price_frames, ignore_index=True) if price_frames else pd.DataFrame()
     silver_price = transform_stock_price(price_raw)
     if not silver_price.empty:
+        silver_price = silver_price[~silver_price["stock_id"].astype(str).eq("0050")]
         silver_price = silver_price[pd.to_datetime(silver_price["date"], errors="coerce") >= pd.Timestamp(DEFAULT_START_DATE)]
     write_table(silver_price, "silver_stock_price", SILVER_DIR)
     revenue_frames = [_read_raw_dataset("TWSEMonthlyRevenue"), _concat_raw("TaiwanStockMonthRevenue", stock_ids)]
