@@ -1,6 +1,6 @@
-# Taiwan Top Fundamental & Price Intelligence Platform
+# Taiwan Stock Intelligence
 
-台股基本面與股價智慧分析平台是一個 value-oriented data engineering MVP side project。它使用 TWSE OpenAPI 擷取台灣上市公司的每日股價、月營收、財務資料與公司基本資料，整理為 silver/gold analytical tables，並在 Streamlit App 中呈現高流動性台股公司的近五年營運與股價趨勢。
+Taiwan Stock Intelligence 是一個台股基本面與股價智慧分析 App，也是一個 value-oriented data engineering MVP side project。它使用 TWSE OpenAPI 擷取台灣上市公司的每日股價、月營收、財務資料與公司基本資料，整理為 silver/gold analytical tables，並在 Streamlit App 中呈現高流動性台股公司的近五年營運與股價趨勢。
 
 > Disclaimer: 本專案僅作為資料工程與分析 side project，不構成投資建議。Financial Health Score 是 MVP scoring logic，用於展示資料產品設計，不應直接作為買賣依據。
 

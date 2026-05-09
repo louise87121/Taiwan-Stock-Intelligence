@@ -8,7 +8,7 @@ import plotly.express as px
 import streamlit as st
 
 
-APP_TITLE = "Taiwan Top Fundamental & Price Intelligence App"
+APP_TITLE = "Taiwan Stock Intelligence"
 PROJECT_ROOT = Path(__file__).resolve().parent
 GOLD_DIR = PROJECT_ROOT / "data" / "gold"
 SILVER_DIR = PROJECT_ROOT / "data" / "silver"
@@ -301,6 +301,15 @@ def bar_chart(df: pd.DataFrame, x: str, y: str, title: str, color: str | None = 
     st.plotly_chart(fig, use_container_width=True)
 
 
+def horizontal_bar_chart(df: pd.DataFrame, x: str, y: str, title: str, color: str | None = None) -> None:
+    if df.empty or x not in df.columns or y not in df.columns:
+        show_empty_state(f"No data available for {title}.")
+        return
+    fig = px.bar(df, x=x, y=y, color=color, orientation="h", title=title, text_auto=".2s")
+    fig.update_layout(xaxis_title=x, yaxis_title="", height=420, yaxis={"categoryorder": "total ascending"})
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def scatter_chart(df: pd.DataFrame, x: str, y: str, title: str, color: str | None = None) -> None:
     if df.empty or x not in df.columns or y not in df.columns:
         show_empty_state(f"No data available for {title}.")
@@ -393,6 +402,21 @@ def financial_statement_section(financials: pd.DataFrame, stock_id: str, title: 
 
 def page_executive_overview(snapshot: pd.DataFrame, month_range: tuple[str, str] | None, industry_group: str) -> None:
     st.title("Executive Overview")
+    st.markdown(
+        """
+        **Taiwan Stock Intelligence** 是一個 value-oriented data application，
+        用資料工程流程整合台灣上市公司的每日股價、月營收、財務指標與產業分類，協助使用者快速理解公司營運狀況、
+        市場反應與潛在風險。
+
+        這個 App 不是單純的股價查詢工具。資料會先經過 raw、silver、gold 三層處理，
+        再轉成適合互動分析的表格與圖表，支援公司分析、月營收追蹤、產業同業比較與風險監控。
+        目前資料來源以 TWSE / MOPS 公開資料為主，分析窗口預設為近五年。
+        """
+    )
+    st.info(
+        "Disclaimer: 本專案僅作為資料工程與分析 side project，不構成投資建議。"
+        "Financial Health Score 是 MVP scoring logic，用於展示資料產品設計，不應直接作為買賣依據。"
+    )
     st.caption("Business interpretation: this page summarizes market-wide operating momentum, valuation-sensitive health scores, and current risk concentration across the selected coverage universe.")
     df = filter_industry(filter_month_range(snapshot, month_range), industry_group)
     lm = latest_month(df)
@@ -644,9 +668,57 @@ def page_revenue_growth(revenue_growth: pd.DataFrame, stock_id: str, month_range
         bar_chart(latest.sort_values("revenue_yoy", ascending=True).head(10), "stock_name", "revenue_yoy", "Latest Revenue YoY Bottom 10", "revenue_growth_signal")
 
     st.subheader("Revenue Growth Signal Distribution")
-    signal_counts = latest["revenue_growth_signal"].value_counts().reset_index()
-    signal_counts.columns = ["revenue_growth_signal", "company_count"]
-    bar_chart(signal_counts, "revenue_growth_signal", "company_count", "Latest Revenue Growth Signal Distribution")
+    st.caption(
+        "分析標準：依最新月份的 `revenue_growth_signal` 分類。"
+        "`Strong Growth` 代表 YoY 明顯成長且 MoM 為正；`Improving` 代表 YoY 為正；"
+        "`Declining` 代表 YoY 與 MoM 同時轉弱；`Mixed` 代表訊號不一致；`Unknown` 代表資料不足。"
+    )
+    signal_order = ["Strong Growth", "Improving", "Mixed", "Declining", "Unknown"]
+    signal_summary = (
+        latest.groupby("revenue_growth_signal", dropna=False)
+        .agg(
+            company_count=("stock_id", "nunique"),
+            avg_revenue_yoy=("revenue_yoy", "mean"),
+            median_revenue_yoy=("revenue_yoy", "median"),
+            avg_revenue_mom=("revenue_mom", "mean"),
+            total_revenue=("revenue", "sum"),
+        )
+        .reset_index()
+    )
+    signal_summary["revenue_growth_signal"] = signal_summary["revenue_growth_signal"].fillna("Unknown")
+    total_companies = signal_summary["company_count"].sum()
+    signal_summary["company_share"] = signal_summary["company_count"] / total_companies if total_companies else 0
+    signal_summary["sort_order"] = signal_summary["revenue_growth_signal"].map({label: idx for idx, label in enumerate(signal_order)}).fillna(99)
+    signal_summary = signal_summary.sort_values("sort_order")
+
+    metric_cols = st.columns(4)
+    for idx, label in enumerate(["Strong Growth", "Improving", "Declining", "Unknown"]):
+        count = signal_summary.loc[signal_summary["revenue_growth_signal"].eq(label), "company_count"]
+        metric_cols[idx].metric(label, f"{int(count.iloc[0]) if not count.empty else 0:,}")
+
+    col5, col6 = st.columns(2)
+    with col5:
+        horizontal_bar_chart(signal_summary, "company_count", "revenue_growth_signal", "Company Count by Revenue Growth Signal", "revenue_growth_signal")
+    with col6:
+        horizontal_bar_chart(signal_summary, "avg_revenue_yoy", "revenue_growth_signal", "Average Revenue YoY by Signal", "revenue_growth_signal")
+
+    st.subheader("Signal Quality Summary")
+    summary_table = signal_summary.drop(columns=["sort_order"])
+    st.dataframe(format_table(summary_table), use_container_width=True, hide_index=True)
+
+    st.subheader("Companies by Signal")
+    signal_filter = st.selectbox(
+        "Revenue Growth Signal",
+        [label for label in signal_order if label in set(latest["revenue_growth_signal"].fillna("Unknown"))],
+        key="revenue_signal_filter",
+    )
+    signal_companies = latest[latest["revenue_growth_signal"].fillna("Unknown").eq(signal_filter)].copy()
+    signal_cols = ["stock_id", "stock_name", "industry_group", "revenue", "revenue_yoy", "revenue_mom", "revenue_growth_signal"]
+    st.dataframe(
+        format_table(signal_companies[[col for col in signal_cols if col in signal_companies.columns]].sort_values("revenue_yoy", ascending=False)),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 def page_risk_monitoring(snapshot: pd.DataFrame, month_range: tuple[str, str] | None, industry_group: str) -> None:
@@ -662,12 +734,24 @@ def page_risk_monitoring(snapshot: pd.DataFrame, month_range: tuple[str, str] | 
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("High Risk Companies")
+        st.caption(
+            "篩選標準：使用最新月份資料，且 `risk_level = High Risk`。"
+            "此等級來自 Financial Health Score，代表分數低於 40。"
+        )
         st.dataframe(format_table(latest[latest["risk_level"].eq("High Risk")].sort_values("financial_health_score")), use_container_width=True, hide_index=True)
     with col2:
         st.subheader("Watch Companies")
+        st.caption(
+            "篩選標準：使用最新月份資料，且 `risk_level = Watch`。"
+            "此等級來自 Financial Health Score，代表分數介於 40 到 59。"
+        )
         st.dataframe(format_table(latest[latest["risk_level"].eq("Watch")].sort_values("financial_health_score")), use_container_width=True, hide_index=True)
 
     st.subheader("Negative Revenue YoY and Below MA60")
+    st.caption(
+        "篩選標準：使用最新月份資料，且 `revenue_yoy < 0`，同時 `price_above_ma60_flag = False`。"
+        "這代表營收年增率為負，且股價低於 60 日均線。"
+    )
     weak_trend = latest[(latest["revenue_yoy"] < 0) & (latest["price_above_ma60_flag"] == False)]
     st.dataframe(
         format_table(weak_trend[["stock_id", "stock_name", "industry_group", "revenue_yoy", "monthly_return", "financial_health_score", "risk_level"]]),

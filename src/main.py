@@ -294,7 +294,7 @@ def run_all(start_date: str = DEFAULT_START_DATE, end_date: str | None = None) -
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Taiwan Stock Fundamental & Price Intelligence Platform")
+    parser = argparse.ArgumentParser(description="Taiwan Stock Intelligence")
     parser.add_argument("command", choices=["extract", "extract-history", "transform", "build-gold", "load-duckdb", "run-all"])
     parser.add_argument("--start-date", default=DEFAULT_START_DATE)
     parser.add_argument("--end-date", default=None)
