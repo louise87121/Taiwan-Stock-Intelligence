@@ -523,24 +523,22 @@ def page_company_analysis(
             use_container_width=True,
             hide_index=True,
         )
-        col1, col2 = st.columns(2)
-        with col1:
-            profile_price = filter_stock(monthly_stock_price_features(stock_features), stock_id)
-            profile_price = filter_month_range(profile_price, month_range)
-            line_chart(profile_price, "month", "close_price", f"{company_name} 月股價趨勢")
-        with col2:
-            if not industry_rank.empty:
-                rank_value_cols = [
-                    "industry_revenue_yoy_rank",
-                    "industry_monthly_return_rank",
-                    "industry_health_score_rank",
-                    "industry_volatility_rank",
-                ]
-                rank_long = industry_rank[["month", *rank_value_cols]].melt(id_vars="month", var_name="rank_type", value_name="rank")
-                industry_name = industry_group_label(industry_rank["industry_group"].dropna().iloc[-1])
-                line_chart(rank_long, "month", "rank", f"{company_name} {industry_name} Peer Ranks", "rank_type")
-            else:
-                show_empty_state("No industry peer rank is available for the selected company.")
+        profile_price = filter_stock(monthly_stock_price_features(stock_features), stock_id)
+        profile_price = filter_month_range(profile_price, month_range)
+        line_chart(profile_price, "month", "close_price", f"{company_name} 月股價趨勢")
+
+        if not industry_rank.empty:
+            rank_value_cols = [
+                "industry_revenue_yoy_rank",
+                "industry_monthly_return_rank",
+                "industry_health_score_rank",
+                "industry_volatility_rank",
+            ]
+            rank_long = industry_rank[["month", *rank_value_cols]].melt(id_vars="month", var_name="rank_type", value_name="rank")
+            industry_name = industry_group_label(industry_rank["industry_group"].dropna().iloc[-1])
+            line_chart(rank_long, "month", "rank", f"{company_name} {industry_name} Peer Ranks", "rank_type")
+        else:
+            show_empty_state("No industry peer rank is available for the selected company.")
 
         if not industry_rank.empty:
             st.subheader("產業同業排名")
@@ -565,6 +563,10 @@ def page_company_analysis(
                     "industry_volatility_rank": "波動率排名",
                 }
             )
+            integer_cols = ["同業家數", "營收 YoY 排名", "月報酬排名", "健康分數排名", "波動率排名"]
+            for column in integer_cols:
+                if column in rank_table.columns:
+                    rank_table[column] = pd.to_numeric(rank_table[column], errors="coerce").astype("Int64")
             st.dataframe(centered_table(format_table(rank_table)), use_container_width=True, hide_index=True)
 
     with tabs[1]:
@@ -771,7 +773,6 @@ def page_risk_monitoring(snapshot: pd.DataFrame, month_range: tuple[str, str] | 
 def main() -> None:
     required_tables = [
         "gold_company_monthly_snapshot",
-        "gold_operating_dashboard",
         "gold_stock_price_features",
         "gold_revenue_growth",
         "gold_semiconductor_peer_comparison",
@@ -804,7 +805,10 @@ def main() -> None:
     revenue_growth = filter_app_universe(revenue_growth, universe_stock_ids)
 
     base_for_filters = operating_dashboard if not operating_dashboard.empty else (snapshot if not snapshot.empty else revenue_growth)
-    stock_options = sorted(base_for_filters["stock_id"].dropna().astype(str).unique()) if "stock_id" in base_for_filters.columns else []
+    stock_option_frames = [df for df in [base_for_filters, stock_features] if not df.empty and "stock_id" in df.columns]
+    stock_options = sorted(
+        pd.concat([df[["stock_id"]] for df in stock_option_frames], ignore_index=True)["stock_id"].dropna().astype(str).unique()
+    ) if stock_option_frames else []
     default_stock_index = stock_options.index("2330") if "2330" in stock_options else 0
     stock_id = st.sidebar.selectbox("Company stock_id", stock_options, index=default_stock_index) if stock_options else ""
 
