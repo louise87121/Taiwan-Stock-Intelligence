@@ -18,7 +18,7 @@ App pages:
 - Company Analysis: 可選公司分析，包含公司基本資料、月營收、每日股價、股價趨勢、日報酬率與股價財務指標關聯。
 - Semiconductor Peer Comparison: 半導體同業 revenue YoY、monthly return、volatility、health score 與排名。
 - Revenue Growth Analysis: 可選公司月營收、YoY 趨勢、Top/Bottom 10 與 growth signal 分布。
-- Risk Monitoring: High Risk、Watch、YoY 衰退且低於 MA60、高波動公司與風險分布。
+- Risk Monitoring: Watch、High、YoY 衰退且低於 MA60、高波動公司與風險分布。
 
 Screenshots placeholder:
 
@@ -113,6 +113,19 @@ python -m src.main run-all --start-date 2021-01-01 --end-date 2026-05-04
 
 `run-all` executes extraction, silver transforms, gold table builds, semiconductor peer comparison, company snapshot generation, and DuckDB loading.
 
+### Weekly Refresh
+
+The local scheduler runs every Saturday at 08:30 and refreshes data through the most recent Friday:
+
+```bash
+python scripts/weekly_refresh.py
+```
+
+The launchd job is `com.taiwan-stock-intelligence.weekly-refresh`. Logs are written to:
+
+- `logs/weekly_refresh.log`
+- `logs/weekly_refresh.err`
+
 ## Run the Streamlit App Locally
 
 Generate gold tables first:
@@ -206,10 +219,10 @@ The score starts from 50 and is capped between 0 and 100.
 
 Risk levels:
 
-- 80 to 100: `Low Risk`
-- 60 to 79: `Moderate Risk`
-- 40 to 59: `Watch`
-- Below 40: `High Risk`
+- 85 to 100: `Low`
+- 75 to 84: `Mid`
+- 65 to 74: `High`
+- Below 65: `Watch`
 
 ## Operating Dashboard Metrics
 
@@ -242,7 +255,7 @@ Risk levels:
 3. Semiconductor Peer Comparison: 半導體公司 revenue growth、return、volatility 與 health score 比較。
 4. Revenue Growth Analysis: 月營收 YoY/MoM、growth signal、連續衰退公司。
 5. Stock Price Trend: close price、MA20、MA60、volatility、daily/monthly return。
-6. Risk Monitoring: High Risk、Watch、營收衰退且高波動、股價低於 MA60 且 YoY 為負。
+6. Risk Monitoring: Watch、High、營收衰退且高波動、股價低於 MA60 且 YoY 為負。
 
 ## Streamlit Dashboard Pages
 
@@ -252,7 +265,7 @@ The Streamlit app uses wide layout, sidebar navigation, company/month/industry f
 2. Company Analysis: selected company page with company profile, monthly revenue, and monthly stock price.
 3. Semiconductor Peer Comparison: compares semiconductor peers using revenue growth, return, volatility, valuation, and ranks.
 4. Revenue Growth Analysis: focuses on revenue trend, YoY momentum, growth signals, and top/bottom movers.
-5. Risk Monitoring: highlights High Risk and Watch companies plus weak revenue/price trend and high volatility signals.
+5. Risk Monitoring: highlights Watch and High companies plus weak revenue/price trend and high volatility signals.
 
 ## Tests
 

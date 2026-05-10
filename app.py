@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Iterable
 
@@ -14,6 +15,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = PROJECT_ROOT / "config" / "stocks.yml"
 GOLD_DIR = PROJECT_ROOT / "data" / "gold"
 SILVER_DIR = PROJECT_ROOT / "data" / "silver"
+RISK_LEVEL_ORDER = ["Watch", "High", "Mid", "Low"]
+RISK_COLOR_MAP = {
+    "Watch": "#dc2626",
+    "High": "#fca5a5",
+    "Mid": "#93c5fd",
+    "Low": "#2563eb",
+}
 
 TWSE_INDUSTRY_LABELS = {
     "1": "Cement",
@@ -133,13 +141,56 @@ def normalize_types(df: pd.DataFrame) -> pd.DataFrame:
     return normalized
 
 
+def latest_price_date_label(stock_features: pd.DataFrame, operating_dashboard: pd.DataFrame) -> str:
+    date_values = []
+    if not stock_features.empty and "date" in stock_features.columns:
+        date_values.append(pd.to_datetime(stock_features["date"], errors="coerce").max())
+    if not operating_dashboard.empty and "latest_price_date" in operating_dashboard.columns:
+        date_values.append(pd.to_datetime(operating_dashboard["latest_price_date"], errors="coerce").max())
+    valid_dates = [value for value in date_values if pd.notna(value)]
+    if not valid_dates:
+        return "N/A"
+    return max(valid_dates).strftime("%Y-%m-%d")
+
+
+def page_header(title: str, latest_price_date: str) -> None:
+    title_col, date_col = st.columns([0.72, 0.28], vertical_alignment="top")
+    with title_col:
+        st.title(title)
+    with date_col:
+        st.markdown(
+            f"""
+            <div style="text-align: right; padding-top: 0.85rem;">
+              <span style="color: #64748b; font-size: 0.86rem;">Latest price date</span><br>
+              <strong style="font-size: 1rem;">{latest_price_date}</strong>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 @st.cache_data(show_spinner=False)
-def load_config_stock_ids() -> list[str]:
+def load_config_stocks() -> list[dict[str, str]]:
     if not CONFIG_PATH.exists():
         return []
     with CONFIG_PATH.open("r", encoding="utf-8") as file:
         payload = yaml.safe_load(file) or {}
-    return [str(row.get("stock_id")).strip() for row in payload.get("stocks", []) if row.get("stock_id")]
+    return [
+        {
+            "stock_id": str(row.get("stock_id")).strip(),
+            "stock_name": str(row.get("stock_name", "")).strip(),
+        }
+        for row in payload.get("stocks", [])
+        if row.get("stock_id")
+    ]
+
+
+def load_config_stock_ids() -> list[str]:
+    return [row["stock_id"] for row in load_config_stocks()]
+
+
+def load_config_stock_names() -> dict[str, str]:
+    return {row["stock_id"]: row["stock_name"] for row in load_config_stocks() if row.get("stock_name")}
 
 
 def get_app_universe_stock_ids(operating_dashboard: pd.DataFrame) -> list[str]:
@@ -338,6 +389,46 @@ def filter_stock(df: pd.DataFrame, stock_id: str) -> pd.DataFrame:
     return df[df["stock_id"].astype(str).eq(stock_id)].copy()
 
 
+def latest_record_per_stock(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "stock_id" not in df.columns:
+        return pd.DataFrame()
+    sort_cols = [col for col in ["month", "latest_price_date", "date"] if col in df.columns]
+    if not sort_cols:
+        return df.drop_duplicates("stock_id", keep="last").copy()
+    return df.sort_values(sort_cols).groupby(df["stock_id"].astype(str), as_index=False).tail(1).copy()
+
+
+def strict_risk_level(score: float) -> str:
+    if pd.notna(score) and score >= 85:
+        return "Low"
+    if pd.notna(score) and score >= 75:
+        return "Mid"
+    if pd.notna(score) and score >= 65:
+        return "High"
+    return "Watch"
+
+
+def apply_monitoring_risk_levels(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "financial_health_score" not in df.columns:
+        return df.copy()
+    monitored = df.copy()
+    scores = pd.to_numeric(monitored["financial_health_score"], errors="coerce")
+    ranked_index = monitored.assign(_risk_sort_score=scores).sort_values(
+        ["_risk_sort_score", "stock_id"],
+        na_position="last",
+    ).index.tolist()
+    company_count = len(ranked_index)
+    if company_count == 0:
+        return monitored
+
+    watch_count = max(1, math.ceil(company_count * 0.15))
+    high_count = max(1, math.ceil(company_count * 0.25)) if company_count > watch_count else 0
+    monitored["risk_level"] = scores.map(strict_risk_level)
+    monitored.loc[ranked_index[:watch_count], "risk_level"] = "Watch"
+    monitored.loc[ranked_index[watch_count : watch_count + high_count], "risk_level"] = "High"
+    return monitored
+
+
 def show_empty_state(message: str) -> None:
     st.info(message)
 
@@ -346,8 +437,21 @@ def bar_chart(df: pd.DataFrame, x: str, y: str, title: str, color: str | None = 
     if df.empty or x not in df.columns or y not in df.columns:
         show_empty_state(f"No data available for {title}.")
         return
-    fig = px.bar(df, x=x, y=y, color=color, title=title, text_auto=".2s")
+    category_orders = {x: df[x].astype(str).tolist()}
+    if color == "risk_level":
+        category_orders[color] = RISK_LEVEL_ORDER
+    fig = px.bar(
+        df,
+        x=x,
+        y=y,
+        color=color,
+        title=title,
+        text_auto=".2s",
+        category_orders=category_orders,
+        color_discrete_map=RISK_COLOR_MAP if color == "risk_level" else None,
+    )
     fig.update_layout(xaxis_title="", yaxis_title=y, height=420)
+    fig.update_xaxes(categoryorder="array", categoryarray=category_orders[x])
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -450,8 +554,8 @@ def financial_statement_section(financials: pd.DataFrame, stock_id: str, title: 
         line_chart(trend, "date", "value", f"{title} Metric Trend", "normalized_metric_name")
 
 
-def page_executive_overview(snapshot: pd.DataFrame, month_range: tuple[str, str] | None, industry_group: str) -> None:
-    st.title("Executive Overview")
+def page_executive_overview(snapshot: pd.DataFrame, month_range: tuple[str, str] | None, industry_group: str, latest_price_date: str) -> None:
+    page_header("Executive Overview", latest_price_date)
     st.markdown(
         """
         **Taiwan Stock Intelligence** 是一個 value-oriented data application，
@@ -470,7 +574,7 @@ def page_executive_overview(snapshot: pd.DataFrame, month_range: tuple[str, str]
     st.caption("Business interpretation: this page summarizes market-wide operating momentum, valuation-sensitive health scores, and current risk concentration across the selected coverage universe.")
     df = filter_industry(filter_month_range(snapshot, month_range), industry_group)
     lm = latest_month(df)
-    latest = df[df["month"].eq(lm)].copy() if lm else pd.DataFrame()
+    latest = apply_monitoring_risk_levels(latest_record_per_stock(df))
 
     if latest.empty:
         show_empty_state("No company monthly snapshot data is available for the selected filters.")
@@ -478,20 +582,20 @@ def page_executive_overview(snapshot: pd.DataFrame, month_range: tuple[str, str]
 
     metric_cols = st.columns(5)
     metric_cols[0].metric("Avg Health Score", format_number(latest["financial_health_score"].mean()))
-    for idx, risk_level in enumerate(["Low Risk", "Moderate Risk", "Watch", "High Risk"], start=1):
+    for idx, risk_level in enumerate(["Low", "Mid", "High", "Watch"], start=1):
         metric_cols[idx].metric(risk_level, f"{latest['risk_level'].eq(risk_level).sum():,}")
 
-    st.subheader(f"Latest Month: {lm}")
+    st.subheader(f"Latest Available Company Records: up to {lm}")
     col1, col2 = st.columns(2)
     with col1:
-        top_revenue = latest.sort_values("revenue_yoy", ascending=False).head(10)
+        top_revenue = latest.sort_values("revenue_yoy", ascending=False, na_position="last").head(10)
         bar_chart(top_revenue, "stock_name", "revenue_yoy", "Revenue YoY Top 10", "risk_level")
     with col2:
-        top_health = latest.sort_values("financial_health_score", ascending=False).head(10)
+        top_health = latest.sort_values("financial_health_score", ascending=False, na_position="last").head(10)
         bar_chart(top_health, "stock_name", "financial_health_score", "Financial Health Score Top 10", "risk_level")
 
-    st.subheader("High Risk Companies")
-    high_risk = latest[latest["risk_level"].isin(["High Risk", "Watch"])].sort_values("financial_health_score")
+    st.subheader("Watch / High Companies")
+    high_risk = latest[latest["risk_level"].isin(["High", "Watch"])].sort_values("financial_health_score")
     st.dataframe(
         format_table(high_risk[["stock_id", "stock_name", "industry_group", "revenue_yoy", "monthly_return", "volatility_20d", "financial_health_score", "risk_level"]]),
         use_container_width=True,
@@ -507,8 +611,9 @@ def page_company_analysis(
     peers: pd.DataFrame,
     stock_id: str,
     month_range: tuple[str, str] | None,
+    latest_price_date: str,
 ) -> None:
-    st.title("Company Analysis")
+    page_header("Company Analysis", latest_price_date)
     st.caption("Business interpretation: this page organizes the selected company into operating profile, monthly revenue, and daily stock price analysis.")
     source = operating_dashboard if not operating_dashboard.empty else snapshot
     company = source[source["stock_id"].astype(str).eq(stock_id)].copy() if not source.empty and stock_id else pd.DataFrame()
@@ -654,8 +759,8 @@ def page_company_analysis(
             st.dataframe(format_table(company_price.sort_values("month", ascending=False)), use_container_width=True, hide_index=True)
 
 
-def page_semiconductor_peer_comparison(peers: pd.DataFrame, month_range: tuple[str, str] | None) -> None:
-    st.title("Semiconductor Peer Comparison")
+def page_semiconductor_peer_comparison(peers: pd.DataFrame, month_range: tuple[str, str] | None, latest_price_date: str) -> None:
+    page_header("Semiconductor Peer Comparison", latest_price_date)
     st.caption("Business interpretation: this view compares semiconductor companies by revenue momentum, market reaction, volatility, valuation, and health ranking.")
     df = filter_month_range(peers, month_range)
     if df.empty and not peers.empty:
@@ -696,8 +801,8 @@ def page_semiconductor_peer_comparison(peers: pd.DataFrame, month_range: tuple[s
     st.dataframe(format_table(latest[[col for col in cols if col in latest.columns]].sort_values("health_score_rank")), use_container_width=True, hide_index=True)
 
 
-def page_revenue_growth(revenue_growth: pd.DataFrame, stock_id: str, month_range: tuple[str, str] | None, industry_group: str) -> None:
-    st.title("Revenue Growth Analysis")
+def page_revenue_growth(revenue_growth: pd.DataFrame, stock_id: str, month_range: tuple[str, str] | None, industry_group: str, latest_price_date: str) -> None:
+    page_header("Revenue Growth Analysis", latest_price_date)
     st.caption("Business interpretation: this page separates operating momentum from price movement, making it easier to find improving or deteriorating revenue trends.")
     df = filter_industry(filter_month_range(revenue_growth, month_range), industry_group)
     if df.empty:
@@ -773,35 +878,35 @@ def page_revenue_growth(revenue_growth: pd.DataFrame, stock_id: str, month_range
     )
 
 
-def page_risk_monitoring(snapshot: pd.DataFrame, month_range: tuple[str, str] | None, industry_group: str) -> None:
-    st.title("Risk Monitoring")
+def page_risk_monitoring(snapshot: pd.DataFrame, month_range: tuple[str, str] | None, industry_group: str, latest_price_date: str) -> None:
+    page_header("Risk Monitoring", latest_price_date)
     st.caption("Business interpretation: this page highlights companies with weak revenue, price trend deterioration, high volatility, or low health scores for follow-up review.")
     df = filter_industry(filter_month_range(snapshot, month_range), industry_group)
     lm = latest_month(df)
-    latest = df[df["month"].eq(lm)].copy() if lm else pd.DataFrame()
+    latest = apply_monitoring_risk_levels(latest_record_per_stock(df))
     if latest.empty:
         show_empty_state("No risk monitoring data is available for the selected filters.")
         return
 
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("High Risk Companies")
-        st.caption(
-            "篩選標準：使用最新月份資料，且 `risk_level = High Risk`。"
-            "此等級來自 Financial Health Score，代表分數低於 40。"
-        )
-        st.dataframe(format_table(latest[latest["risk_level"].eq("High Risk")].sort_values("financial_health_score")), use_container_width=True, hide_index=True)
-    with col2:
         st.subheader("Watch Companies")
         st.caption(
-            "篩選標準：使用最新月份資料，且 `risk_level = Watch`。"
-            "此等級來自 Financial Health Score，代表分數介於 40 到 59。"
+            "篩選標準：每檔公司取篩選區間內最新一筆資料，且 `risk_level = Watch`。"
+            "此等級來自較嚴格門檻：Health Score 低於 65，或落在目前篩選範圍分數最低的 15%。"
         )
         st.dataframe(format_table(latest[latest["risk_level"].eq("Watch")].sort_values("financial_health_score")), use_container_width=True, hide_index=True)
+    with col2:
+        st.subheader("High Companies")
+        st.caption(
+            "篩選標準：每檔公司取篩選區間內最新一筆資料，且 `risk_level = High`。"
+            "此等級來自較嚴格門檻：Health Score 介於 65 到 74，或落在 Watch 之後的低分 25%。"
+        )
+        st.dataframe(format_table(latest[latest["risk_level"].eq("High")].sort_values("financial_health_score")), use_container_width=True, hide_index=True)
 
     st.subheader("Negative Revenue YoY and Below MA60")
     st.caption(
-        "篩選標準：使用最新月份資料，且 `revenue_yoy < 0`，同時 `price_above_ma60_flag = False`。"
+        "篩選標準：每檔公司取篩選區間內最新一筆資料，且 `revenue_yoy < 0`，同時 `price_above_ma60_flag = False`。"
         "這代表營收年增率為負，且股價低於 60 日均線。"
     )
     weak_trend = latest[(latest["revenue_yoy"] < 0) & (latest["price_above_ma60_flag"] == False)]
@@ -817,6 +922,8 @@ def page_risk_monitoring(snapshot: pd.DataFrame, month_range: tuple[str, str] | 
     with col4:
         risk_counts = latest["risk_level"].value_counts().reset_index()
         risk_counts.columns = ["risk_level", "company_count"]
+        risk_counts["sort_order"] = risk_counts["risk_level"].map({label: idx for idx, label in enumerate(RISK_LEVEL_ORDER)}).fillna(99)
+        risk_counts = risk_counts.sort_values("sort_order").drop(columns=["sort_order"])
         bar_chart(risk_counts, "risk_level", "company_count", "Latest Risk Level Distribution")
 
 
@@ -848,25 +955,42 @@ def main() -> None:
     revenue_growth = normalize_types(load_gold_table("gold_revenue_growth"))
     peers = normalize_types(load_gold_table("gold_semiconductor_peer_comparison"))
 
+    configured_stock_ids = load_config_stock_ids()
+    configured_stock_names = load_config_stock_names()
     universe_stock_ids = get_app_universe_stock_ids(operating_dashboard)
-    universe_stock_ids = keep_stocks_with_enough_data(
-        universe_stock_ids,
-        snapshot=snapshot,
-        stock_features=stock_features,
-        revenue_growth=revenue_growth,
-    )
+    if not configured_stock_ids:
+        universe_stock_ids = keep_stocks_with_enough_data(
+            universe_stock_ids,
+            snapshot=snapshot,
+            stock_features=stock_features,
+            revenue_growth=revenue_growth,
+        )
     snapshot = filter_app_universe(snapshot, universe_stock_ids)
     operating_dashboard = filter_app_universe(operating_dashboard, universe_stock_ids)
     stock_features = filter_app_universe(stock_features, universe_stock_ids)
     revenue_growth = filter_app_universe(revenue_growth, universe_stock_ids)
+    latest_price_date = latest_price_date_label(stock_features, operating_dashboard)
 
     base_for_filters = operating_dashboard if not operating_dashboard.empty else (snapshot if not snapshot.empty else revenue_growth)
     stock_option_frames = [df for df in [base_for_filters, stock_features] if not df.empty and "stock_id" in df.columns]
-    stock_options = sorted(
+    data_stock_options = sorted(
         pd.concat([df[["stock_id"]] for df in stock_option_frames], ignore_index=True)["stock_id"].dropna().astype(str).unique()
     ) if stock_option_frames else []
+    if configured_stock_ids:
+        stock_options = configured_stock_ids + [stock_id for stock_id in data_stock_options if stock_id not in configured_stock_ids]
+    else:
+        stock_options = data_stock_options
     default_stock_index = stock_options.index("2330") if "2330" in stock_options else 0
-    stock_id = st.sidebar.selectbox("Company stock_id", stock_options, index=default_stock_index) if stock_options else ""
+    stock_id = (
+        st.sidebar.selectbox(
+            "Company stock_id",
+            stock_options,
+            index=default_stock_index,
+            format_func=lambda value: f"{value} {configured_stock_names.get(value, '')}".strip(),
+        )
+        if stock_options
+        else ""
+    )
 
     industry_options = ["All"]
     industry_frames = [df for df in [base_for_filters, stock_features] if not df.empty and "industry_group" in df.columns]
@@ -909,7 +1033,7 @@ def main() -> None:
         return
 
     if page == "Executive Overview":
-        page_executive_overview(snapshot, month_range, industry_group)
+        page_executive_overview(snapshot, month_range, industry_group, latest_price_date)
     elif page == "Company Analysis":
         page_company_analysis(
             snapshot,
@@ -919,13 +1043,14 @@ def main() -> None:
             peers,
             stock_id,
             month_range,
+            latest_price_date,
         )
     elif page == "Semiconductor Peer Comparison":
-        page_semiconductor_peer_comparison(peers, month_range)
+        page_semiconductor_peer_comparison(peers, month_range, latest_price_date)
     elif page == "Revenue Growth Analysis":
-        page_revenue_growth(revenue_growth, stock_id, month_range, industry_group)
+        page_revenue_growth(revenue_growth, stock_id, month_range, industry_group, latest_price_date)
     elif page == "Risk Monitoring":
-        page_risk_monitoring(snapshot, month_range, industry_group)
+        page_risk_monitoring(snapshot, month_range, industry_group, latest_price_date)
 
 
 if __name__ == "__main__":

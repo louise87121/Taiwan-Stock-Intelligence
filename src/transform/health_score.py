@@ -12,13 +12,13 @@ class HealthScoreResult:
 
 
 def map_risk_level(score: int | float) -> str:
-    if score >= 80:
-        return "Low Risk"
-    if score >= 60:
-        return "Moderate Risk"
-    if score >= 40:
-        return "Watch"
-    return "High Risk"
+    if score >= 85:
+        return "Low"
+    if score >= 75:
+        return "Mid"
+    if score >= 65:
+        return "High"
+    return "Watch"
 
 
 def calculate_financial_health_score(
@@ -92,4 +92,3 @@ def append_health_scores(df: pd.DataFrame) -> pd.DataFrame:
     scored["financial_health_score"] = [result.score for result in results]
     scored["risk_level"] = [result.risk_level for result in results]
     return scored
-

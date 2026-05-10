@@ -15,8 +15,7 @@ def test_health_score_is_bounded_and_maps_risk():
 
 
 def test_risk_level_mapping():
-    assert map_risk_level(80) == "Low Risk"
-    assert map_risk_level(60) == "Moderate Risk"
-    assert map_risk_level(40) == "Watch"
-    assert map_risk_level(39) == "High Risk"
-
+    assert map_risk_level(85) == "Low"
+    assert map_risk_level(75) == "Mid"
+    assert map_risk_level(65) == "High"
+    assert map_risk_level(64) == "Watch"

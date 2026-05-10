@@ -4,9 +4,9 @@ stocks:
     industry_group: "Semiconductor"
     market_type: "Listed"
     focus_flag: false
-  - stock_id: "2408"
-    stock_name: "南亞科"
-    industry_group: "Semiconductor"
+  - stock_id: "2308"
+    stock_name: "台達電"
+    industry_group: "Electronic Components"
     market_type: "Listed"
     focus_flag: false
   - stock_id: "2454"
@@ -19,13 +19,63 @@ stocks:
     industry_group: "Electronics Manufacturing"
     market_type: "Listed"
     focus_flag: false
+  - stock_id: "3711"
+    stock_name: "日月光投控"
+    industry_group: "Semiconductor"
+    market_type: "Listed"
+    focus_flag: false
+  - stock_id: "2383"
+    stock_name: "台光電"
+    industry_group: "Electronic Components"
+    market_type: "Listed"
+    focus_flag: false
+  - stock_id: "3037"
+    stock_name: "欣興"
+    industry_group: "Electronic Components"
+    market_type: "Listed"
+    focus_flag: false
+  - stock_id: "2345"
+    stock_name: "智邦"
+    industry_group: "Communications and Internet"
+    market_type: "Listed"
+    focus_flag: false
+  - stock_id: "2881"
+    stock_name: "富邦金"
+    industry_group: "Financial"
+    market_type: "Listed"
+    focus_flag: false
+  - stock_id: "2382"
+    stock_name: "廣達"
+    industry_group: "Computer and Peripheral Equipment"
+    market_type: "Listed"
+    focus_flag: false
   - stock_id: "2303"
     stock_name: "聯電"
     industry_group: "Semiconductor"
     market_type: "Listed"
     focus_flag: false
+  - stock_id: "6669"
+    stock_name: "緯穎"
+    industry_group: "Computer and Peripheral Equipment"
+    market_type: "Listed"
+    focus_flag: false
+  - stock_id: "3231"
+    stock_name: "緯創"
+    industry_group: "Computer and Peripheral Equipment"
+    market_type: "Listed"
+    focus_flag: false
+  - stock_id: "8299"
+    stock_name: "群聯"
+    industry_group: "Semiconductor"
+    market_type: "Listed"
+    focus_flag: false
   - stock_id: "2344"
     stock_name: "華邦電"
+    industry_group: "Semiconductor"
+    market_type: "Listed"
+    focus_flag: false
+  - stock_id: "2337"
+    stock_name: "旺宏"
     industry_group: "Semiconductor"
     market_type: "Listed"
     focus_flag: false

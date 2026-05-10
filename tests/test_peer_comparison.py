@@ -18,7 +18,7 @@ def test_semiconductor_peer_ranking_and_winbond_config():
             "volatility_20d": [0.04, 0.02, 0.01],
             "pe_ratio": [12, 20, 10],
             "financial_health_score": [70, 80, 90],
-            "risk_level": ["Moderate Risk", "Low Risk", "Low Risk"],
+            "risk_level": ["Mid", "Low", "Low"],
         }
     )
     peers = build_semiconductor_peer_comparison(snapshot)

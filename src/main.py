@@ -26,7 +26,10 @@ def _read_raw(dataset: str, stock_id: str | None = None) -> pd.DataFrame:
     path = RAW_DIR / f"{dataset}{suffix}.csv"
     if not path.exists():
         return pd.DataFrame()
-    return pd.read_csv(path)
+    try:
+        return pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
 
 
 def _concat_raw(dataset: str, stock_ids: list[str]) -> pd.DataFrame:
@@ -50,7 +53,7 @@ def run_extract(start_date: str = DEFAULT_START_DATE, end_date: str | None = Non
     extract_all_twse()
 
 
-def run_transform() -> None:
+def run_transform(end_date: str | None = None) -> None:
     bootstrap_environment()
     stocks = load_stocks()
     stock_ids = [stock.stock_id for stock in stocks]
@@ -61,7 +64,11 @@ def run_transform() -> None:
     silver_price = transform_stock_price(price_raw)
     if not silver_price.empty:
         silver_price = silver_price[~silver_price["stock_id"].astype(str).eq("0050")]
-        silver_price = silver_price[pd.to_datetime(silver_price["date"], errors="coerce") >= pd.Timestamp(DEFAULT_START_DATE)]
+        price_dates = pd.to_datetime(silver_price["date"], errors="coerce")
+        silver_price = silver_price[price_dates >= pd.Timestamp(DEFAULT_START_DATE)]
+        if end_date:
+            price_dates = pd.to_datetime(silver_price["date"], errors="coerce")
+            silver_price = silver_price[price_dates <= pd.Timestamp(end_date)]
     write_table(silver_price, "silver_stock_price", SILVER_DIR)
     revenue_frames = [_read_raw_dataset("TWSEMonthlyRevenue"), _concat_raw("TaiwanStockMonthRevenue", stock_ids)]
     revenue_frames = [df for df in revenue_frames if not df.empty]
@@ -289,7 +296,7 @@ def run_build_gold() -> None:
 
 def run_all(start_date: str = DEFAULT_START_DATE, end_date: str | None = None) -> None:
     run_extract(start_date=start_date, end_date=end_date)
-    run_transform()
+    run_transform(end_date=end_date)
     run_build_gold()
     load_tables_to_duckdb()
 
@@ -309,7 +316,7 @@ def main() -> None:
         stock_ids = args.stock_ids or [stock.stock_id for stock in load_stocks()]
         extract_twse_stock_day_history(stock_ids, start_date=args.start_date, end_date=args.end_date)
     elif args.command == "transform":
-        run_transform()
+        run_transform(end_date=args.end_date)
     elif args.command == "build-gold":
         run_build_gold()
     elif args.command == "load-duckdb":
